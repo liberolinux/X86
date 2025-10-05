@@ -45,12 +45,9 @@ xz_version="5.8.1"
 # Set up environment variables
 export LIBERO=/mnt/libero
 export LC_ALL=POSIX
-
-# Set the target architecture
+export PATH=$LIBERO/tools/bin:$PATH
+export CONFIG_SITE=$LIBERO/usr/share/config.site
 export LIBERO_TGT=$(uname -m)-libero-linux-gnu
-
-source ~/.bash_profile
-source ~/.bashrc
 
 # Set the cross-compile flags
 # export CFLAGS="-Oz -pipe -march=x86-64 -fomit-frame-pointer -fstack-clash-protection \

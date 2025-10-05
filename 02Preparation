@@ -24,9 +24,9 @@ start_time=$(date +%s)
 # Set up environment variables for the build process
 export LIBERO=/mnt/libero
 export LC_ALL=POSIX
-
-source ~/.bash_profile
-source ~/.bashrc
+export PATH=$LIBERO/tools/bin:$PATH
+export CONFIG_SITE=$LIBERO/usr/share/config.site
+export LIBERO_TGT=$(uname -m)-libero-linux-gnu
 
 DEVICE=/dev/sdX
 

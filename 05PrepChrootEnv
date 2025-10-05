@@ -24,10 +24,9 @@ start_time=$(date +%s)
 # Set the environment variables
 export LIBERO=/mnt/libero
 export LC_ALL=POSIX
+export PATH=$LIBERO/tools/bin:$PATH
+export CONFIG_SITE=$LIBERO/usr/share/config.site
 export LIBERO_TGT=$(uname -m)-libero-linux-gnu
-
-source ~/.bash_profile
-source ~/.bashrc
 
 # If 05PrepChrootEnv.log does not exists then create it
 if [ ! -f "$LIBERO/sources/05PrepChrootEnv.log" ]; then
