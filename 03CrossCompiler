@@ -29,9 +29,6 @@ linux_version="6.12.49"
 mpc_version="1.3.1"
 mpfr_version="4.2.2"
 
-# Force the bash shell to read the new user profile
-# source ~/.bash_profile
-
 # Set up environment variables for the build process
 export LIBERO=/mnt/libero
 export LC_ALL=POSIX
