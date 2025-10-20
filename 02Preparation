@@ -28,26 +28,9 @@ export PATH=$LIBERO/tools/bin:$PATH
 export CONFIG_SITE=$LIBERO/usr/share/config.site
 export LIBERO_TGT=$(uname -m)-libero-linux-gnu
 
-: "${DEVICE:=/dev/sdX}"
 LIBERO_SOURCE_CACHE="${LIBERO_SOURCE_CACHE:-}"
 LIBERO_CACHE_UID="${LIBERO_CACHE_UID:-}"
 LIBERO_CACHE_GID="${LIBERO_CACHE_GID:-}"
-
-pause_if_interactive() {
-    if [ "${LIBERO_AUTOMATION:-0}" != "1" ]; then
-        read -t 10 -p "Press Enter to continue..." || true
-    fi
-}
-
-if [[ "$DEVICE" =~ (loop[0-9]+|nvme[0-9]+n[0-9]+|mmcblk[0-9]+) ]]; then
-    part_suffix="p"
-else
-    part_suffix=""
-fi
-
-part1="${DEVICE}${part_suffix}1"
-part2="${DEVICE}${part_suffix}2"
-part3="${DEVICE}${part_suffix}3"
 
 acl_version="2.3.2"
 attr_version="2.5.2"
@@ -132,51 +115,8 @@ xz_version="5.8.1"
 zlib_version="1.3.1"
 zstd_version="1.5.7"
 
-if grep -qs '$LIBERO' /proc/mounts; then
-    sudo umount -fv $LIBERO
-fi
-
-# Create GPT label
-sudo parted "$DEVICE" mklabel gpt
-
-# Create 64MiB BIOS (GRUB) partition: 1MiB..65MiB
-sudo parted "$DEVICE" mkpart primary 1MiB 65MiB
-sudo parted "$DEVICE" set 1 bios_grub on
-
-# Create 8GiB swap partition: 65MiB .. 8257MiB (65 + 8192 = 8257)
-sudo parted "$DEVICE" mkpart primary linux-swap 65MiB 8257MiB
-
-# Create ext4 partition using the rest of the disk
-sudo parted "$DEVICE" mkpart primary ext4 8257MiB 100%
-
-# Let kernel re-read the partition table
-sudo partprobe "$DEVICE" || sleep 1
-
-# Format the swap partition
-sudo mkswap -L SWAP "$part2"
-sudo swapon "$part2"
-
-# Format the ext4 partition
-sudo mkfs.ext4 -L LIBERO "$part3"
-sudo e2fsck -f "$part3"
-
-# Show resulting partition table
-sudo parted "$DEVICE" print
-
-echo ""
-pause_if_interactive
-
-# Create a new directory for LIBERO system if it doesn't exist
 if [ ! -d "$LIBERO" ]; then
-    sudo mkdir -pv $LIBERO
-fi
-
-# Check if the partitions are already mounted
-if grep -qs '$LIBERO' /proc/mounts; then
-    echo "LIBERO partition is already mounted"
-else
-    # Mount the new partition to the LIBERO directory
-    sudo mount -v -t ext4 "$part3" /mnt/libero
+    sudo mkdir -pv "$LIBERO"
 fi
 
 if [ ! -d "$LIBERO/tools" ]; then
@@ -355,37 +295,16 @@ if [ -n "$LIBERO_SOURCE_CACHE" ]; then
     fi
 fi
 
-echo ""
-pause_if_interactive
+# Download the linux-firmware package
+sudo git clone  https://git.kernel.org/pub/scm/linux/kernel/git/firmware/linux-firmware.git \
+    $LIBERO/sources/linux-firmware
 
-echo ""
-
-# Ask the user if they want to download the linux-firmware package
-echo "Do you want to download the linux-firmware package?"
-echo -n "(y/n): "
-read choice
-if [[ $choice == "y" || $choice == "Y" || $choice == "Yes" || $choice == "YES" ]]; then
-    echo ""
-    # Download the linux-firmware package
-    sudo git clone  https://git.kernel.org/pub/scm/linux/kernel/git/firmware/linux-firmware.git \
-        $LIBERO/sources/linux-firmware
-
-    total_packages=$((total_packages + 1))
-
-    echo ""
-    pause_if_interactive
-else
-    echo ""
-    echo "Skipping the download of linux-firmware package."
-fi
+total_packages=$((total_packages + 1))
 
 echo ""
 
 echo "Total Packages Downloaded= $total_packages \($((total_packages - total_patches))\)"
 echo "Total Patches Downloaded= $total_patches"
-
-echo ""
-pause_if_interactive
 
 echo ""
 
