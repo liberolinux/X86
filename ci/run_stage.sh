@@ -28,6 +28,10 @@ detect_part_suffix() {
 
 attach_disk() {
   loopdev=$(losetup --find --show --partscan "$IMAGE_PATH")
+  if [[ -z "$loopdev" ]]; then
+    echo "Failed to attach loop device for $IMAGE_PATH" >&2
+    exit 1
+  fi
   part_suffix=$(detect_part_suffix "$loopdev")
   swap_part="${loopdev}${part_suffix}2"
   root_part="${loopdev}${part_suffix}3"

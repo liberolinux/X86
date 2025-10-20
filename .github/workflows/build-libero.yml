@@ -14,7 +14,7 @@ env:
   SOURCE_CACHE_KEY_PREFIX: libero-sources
   COMMON_APT_PACKAGES: build-essential binutils bison gawk texinfo xz-utils m4 python3
     python3-distutils python3-setuptools perl tar patch diffutils findutils gzip sed
-    grep coreutils git curl wget rsync parted xorriso sudo ca-certificates
+    grep coreutils git curl wget rsync parted xorriso sudo ca-certificates udev
 jobs:
   Script_01Requirements:
     name: 01Requirements
