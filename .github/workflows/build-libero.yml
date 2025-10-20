@@ -75,11 +75,10 @@ jobs:
           curl -fsSLO "$tarball_url"
           mv "$tarball_name" stage3.tar.xz
 
-          cat > Dockerfile <<'EOF'
-FROM scratch
-ADD stage3.tar.xz /
-CMD ["/bin/bash"]
-EOF
+          printf '%s\n' \
+            "FROM scratch" \
+            "ADD stage3.tar.xz /" \
+            "CMD [\"/bin/bash\"]" > Dockerfile
 
           docker build -t "${GENTOO_IMAGE}" .
           docker save "${GENTOO_IMAGE}" -o ../gentoo-stage3-i486-systemd.tar
