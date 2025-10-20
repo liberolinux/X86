@@ -165,6 +165,11 @@ if [[ "$stage" =~ ^0[3-9]$ || "$stage" =~ ^1[01]$ ]]; then
   enable_swap
 fi
 
+if [[ "$stage" =~ ^0[3-9]$ || "$stage" =~ ^1[01]$ ]]; then
+  sudo partprobe "$loopdev"
+  sleep 1
+fi
+
 if [[ "$stage" =~ ^0[6-9]$ || "$stage" == "10" ]]; then
   setup_chroot_mounts
   run_chroot_script "$script_name"
