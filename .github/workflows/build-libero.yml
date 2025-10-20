@@ -58,10 +58,35 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         run: echo "${GITHUB_TOKEN}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
 
-      - name: Pull Gentoo base image
-        run: docker pull "${GENTOO_IMAGE}"
+      - name: Select Gentoo base image
+        id: select_image
+        run: |
+          set -euo pipefail
+          candidates=(
+            "${GENTOO_IMAGE}"
+            "ghcr.io/gentoo/stage3:openrc-i686"
+            "ghcr.io/gentoo/stage3:openrc-x86"
+            "gentoo/stage3:systemd-i686"
+            "gentoo/stage3:openrc-i686"
+            "gentoo/stage3:openrc-x86"
+          )
+          for image in "${candidates[@]}"; do
+            if [ -z "$image" ]; then
+              continue
+            fi
+            echo "Attempting to pull $image"
+            if docker pull "$image"; then
+              echo "image=$image" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            echo "Failed to pull $image" >&2
+          done
+          echo "No candidate Gentoo stage3 image could be pulled" >&2
+          exit 1
 
       - name: Stage 1 – Toolchain bootstrap
+        env:
+          SELECTED_GENTOO_IMAGE: ${{ steps.select_image.outputs.image }}
         run: |
           set -euo pipefail
           HOST_UID=$(id -u)
@@ -79,7 +104,7 @@ jobs:
             -e LIBERO_CACHE_GID="${HOST_GID}" \
             -e HOST_UID="${HOST_UID}" \
             -e HOST_GID="${HOST_GID}" \
-            "${GENTOO_IMAGE}" \
+            "${SELECTED_GENTOO_IMAGE}" \
             /bin/bash -lc '
               set -euo pipefail
               source /etc/profile
@@ -216,10 +241,35 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         run: echo "${GITHUB_TOKEN}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
 
-      - name: Pull Gentoo base image
-        run: docker pull "${GENTOO_IMAGE}"
+      - name: Select Gentoo base image
+        id: select_image_build
+        run: |
+          set -euo pipefail
+          candidates=(
+            "${GENTOO_IMAGE}"
+            "ghcr.io/gentoo/stage3:openrc-i686"
+            "ghcr.io/gentoo/stage3:openrc-x86"
+            "gentoo/stage3:systemd-i686"
+            "gentoo/stage3:openrc-i686"
+            "gentoo/stage3:openrc-x86"
+          )
+          for image in "${candidates[@]}"; do
+            if [ -z "$image" ]; then
+              continue
+            fi
+            echo "Attempting to pull $image"
+            if docker pull "$image"; then
+              echo "image=$image" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            echo "Failed to pull $image" >&2
+          done
+          echo "No candidate Gentoo stage3 image could be pulled" >&2
+          exit 1
 
       - name: Stage 2 – System build and ISO
+        env:
+          SELECTED_GENTOO_IMAGE: ${{ steps.select_image_build.outputs.image }}
         run: |
           set -euo pipefail
           HOST_UID=$(id -u)
@@ -236,7 +286,7 @@ jobs:
             -e HOST_UID="${HOST_UID}" \
             -e HOST_GID="${HOST_GID}" \
             -e ISO_ARTIFACT_PATH="${ISO_ARTIFACT_PATH}" \
-            "${GENTOO_IMAGE}" \
+            "${SELECTED_GENTOO_IMAGE}" \
             /bin/bash -lc '
               set -euo pipefail
               source /etc/profile
