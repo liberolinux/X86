@@ -112,7 +112,7 @@ jobs:
               source /etc/profile
 
               if ! command -v sudo >/dev/null 2>&1; then
-                printf '%s\n' '#!/bin/sh' 'exec "$@"' >/usr/bin/sudo
+                printf '%s\n' '#!/bin/sh' "exec \"\$@\"" >/usr/bin/sudo
                 chmod +x /usr/bin/sudo
               fi
 
@@ -279,7 +279,7 @@ jobs:
               source /etc/profile
 
               if ! command -v sudo >/dev/null 2>&1; then
-                printf '%s\n' '#!/bin/sh' 'exec "$@"' >/usr/bin/sudo
+                printf '%s\n' '#!/bin/sh' "exec \"\$@\"" >/usr/bin/sudo
                 chmod +x /usr/bin/sudo
               fi
 
