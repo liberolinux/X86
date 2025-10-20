@@ -27,6 +27,7 @@ export LC_ALL=POSIX
 export PATH=$LIBERO/tools/bin:$PATH
 export CONFIG_SITE=$LIBERO/usr/share/config.site
 export LIBERO_TGT=$(uname -m)-libero-linux-gnu
+LIBERO_AUTOMATION="${LIBERO_AUTOMATION:-0}"
 
 # If 05PrepChrootEnv.log does not exists then create it
 if [ ! -f "$LIBERO/sources/05PrepChrootEnv.log" ]; then
@@ -41,7 +42,9 @@ echo ""
 echo "Welcome to Chapter 7 of Linux From Scratch"
 
 echo ""
-read -t 10 -p "Press Enter to continue..." || true
+if [ "$LIBERO_AUTOMATION" != "1" ]; then
+    read -t 10 -p "Press Enter to continue..." || true
+fi
 
 # Change the ownership of the $LIBERO/* directories to
 # user root by running the following command
@@ -138,13 +141,19 @@ echo "Time: $hours hour(s), $minutes minute(s), and $seconds second(s)"
 
 echo ""
 echo "[Done]"
-read -t 10 -p "Press Enter to continue..." || true
+if [ "$LIBERO_AUTOMATION" != "1" ]; then
+    read -t 10 -p "Press Enter to continue..." || true
+fi
 
 echo ""
 
-sudo chroot "$LIBERO" /usr/bin/env -i       \
-    HOME=/root                              \
-    TERM="$TERM"                            \
-    PS1='(libero chroot) \u:\w\$ '          \
-    PATH=/usr/bin:/usr/sbin                 \
-    /bin/bash --login
+if [ "$LIBERO_AUTOMATION" != "1" ]; then
+    sudo chroot "$LIBERO" /usr/bin/env -i       \
+        HOME=/root                              \
+        TERM="$TERM"                            \
+        PS1='(libero chroot) \u:\w\$ '          \
+        PATH=/usr/bin:/usr/sbin                 \
+        /bin/bash --login
+else
+    echo "Automation mode active: skipping interactive chroot shell drop-in."
+fi

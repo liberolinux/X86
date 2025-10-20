@@ -21,7 +21,10 @@
 # Start Counting Time of Script
 start_time=$(date +%s)
 
-sudo xorriso -as mkisofs -o ~/Downloads/libero-server-edition.iso \
+ISO_OUTPUT="${LIBERO_ISO_OUTPUT:-$HOME/Downloads/libero-server-edition.iso}"
+sudo mkdir -p "$(dirname "$ISO_OUTPUT")"
+
+sudo xorriso -as mkisofs -o "$ISO_OUTPUT" \
         -iso-level 3 -R -J -l \
         -eltorito-alt-boot \
         -e EFI/BOOT/grubx64.efi \

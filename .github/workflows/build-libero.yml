@@ -1,0 +1,331 @@
+name: Build Libero ISO
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  GENTOO_IMAGE: ghcr.io/gentoo/stage3:systemd-i686
+  LIBERO_IMAGE_SIZE: 30G
+  ISO_ARTIFACT_PATH: artifacts/libero-server-edition.iso
+  SOURCE_CACHE_KEY_PREFIX: libero-sources
+  PORTAGE_CACHE_KEY_PREFIX: gentoo-portage
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Ensure workspace folders
+        run: |
+          mkdir -p cache/sources
+          mkdir -p cache/portage/distfiles
+          mkdir -p cache/portage/packages
+          mkdir -p artifacts
+          mkdir -p .ci
+
+      - name: Restore source cache
+        uses: actions/cache@v4
+        with:
+          path: cache/sources
+          key: ${{ env.SOURCE_CACHE_KEY_PREFIX }}-${{ hashFiles('02Preparation') }}
+          restore-keys: |
+            ${{ env.SOURCE_CACHE_KEY_PREFIX }}-
+
+      - name: Restore Portage caches
+        uses: actions/cache@v4
+        with:
+          path: |
+            cache/portage/distfiles
+            cache/portage/packages
+          key: ${{ env.PORTAGE_CACHE_KEY_PREFIX }}-${{ runner.os }}-${{ env.GENTOO_IMAGE }}
+          restore-keys: |
+            ${{ env.PORTAGE_CACHE_KEY_PREFIX }}-${{ runner.os }}-
+            ${{ env.PORTAGE_CACHE_KEY_PREFIX }}-
+
+      - name: Pull Gentoo base image
+        run: docker pull "${GENTOO_IMAGE}"
+
+      - name: Stage 1 – Toolchain bootstrap
+        run: |
+          set -euo pipefail
+          HOST_UID=$(id -u)
+          HOST_GID=$(id -g)
+          rm -f .ci/libero.img .ci/libero-stage1.img .ci/libero-stage1.img.xz
+          docker run --rm --privileged \
+            -v "${PWD}:/workspace" \
+            -v "${PWD}/cache/sources:/workspace/cache/sources" \
+            -v "${PWD}/cache/portage/distfiles:/var/cache/distfiles" \
+            -v "${PWD}/cache/portage/packages:/var/cache/binpkgs" \
+            -w /workspace \
+            -e LIBERO_IMAGE_SIZE="${LIBERO_IMAGE_SIZE}" \
+            -e LIBERO_SOURCE_CACHE=/workspace/cache/sources \
+            -e LIBERO_CACHE_UID="${HOST_UID}" \
+            -e LIBERO_CACHE_GID="${HOST_GID}" \
+            -e HOST_UID="${HOST_UID}" \
+            -e HOST_GID="${HOST_GID}" \
+            "${GENTOO_IMAGE}" \
+            /bin/bash -lc '
+              set -euo pipefail
+              source /etc/profile
+
+              if ! command -v sudo >/dev/null 2>&1; then
+                cat <<'"'"'EOF'"'"' >/usr/bin/sudo
+#!/bin/sh
+exec "$@"
+EOF
+                chmod +x /usr/bin/sudo
+              fi
+
+              if [ ! -d /var/db/repos/gentoo/profiles ]; then
+                emerge-webrsync
+              fi
+
+              emerge --quiet --oneshot sys-block/parted app-cdr/xorriso dev-vcs/git net-misc/wget rsync
+
+              mkdir -p /workspace/.ci
+              IMAGE=/workspace/.ci/libero.img
+              truncate -s "${LIBERO_IMAGE_SIZE:-25G}" "$IMAGE"
+              loopdev=$(losetup --find --show --partscan "$IMAGE")
+
+              if [[ "$loopdev" =~ (loop[0-9]+|nvme[0-9]+n[0-9]+|mmcblk[0-9]+) ]]; then
+                part_suffix="p"
+              else
+                part_suffix=""
+              fi
+
+              swap_part="${loopdev}${part_suffix}2"
+              root_part="${loopdev}${part_suffix}3"
+
+              cleanup() {
+                set +e
+                swapoff "$swap_part" 2>/dev/null
+                for target in \
+                  /mnt/libero/dev/shm \
+                  /mnt/libero/dev/pts \
+                  /mnt/libero/dev \
+                  /mnt/libero/proc \
+                  /mnt/libero/sys \
+                  /mnt/libero/run \
+                  /mnt/libero; do
+                  umount -l "$target" 2>/dev/null
+                done
+                losetup -d "$loopdev" 2>/dev/null
+              }
+              trap cleanup EXIT
+
+              export DEVICE="$loopdev"
+              export LIBERO_AUTOMATION=1
+              export LIBERO_SOURCE_CACHE LIBERO_CACHE_UID LIBERO_CACHE_GID
+
+              for script in 01Requirements 02Preparation 03CrossCompiler 04CrossCompilingTools; do
+                echo "::group::Stage1 ${script}"
+                bash "./${script}"
+                echo "::endgroup::"
+              done
+
+              echo "::group::Stage1 05PrepChrootEnv"
+              bash ./05PrepChrootEnv
+              echo "::endgroup::"
+
+              mkdir -p /workspace/cache/sources
+              chown -R "${HOST_UID:-0}:${HOST_GID:-0}" /workspace/cache/sources || true
+            '
+
+      - name: Compress stage1 disk image
+        run: |
+          set -euo pipefail
+          if [ -f .ci/libero.img ]; then
+            mv .ci/libero.img .ci/libero-stage1.img
+            xz -T0 .ci/libero-stage1.img
+          fi
+
+      - name: Upload stage1 disk image
+        uses: actions/upload-artifact@v4
+        with:
+          name: libero-stage1-img
+          path: .ci/libero-stage1.img.xz
+          if-no-files-found: error
+
+      - name: Cleanup stage1 workspace
+        if: always()
+        run: rm -rf .ci
+
+  build:
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Ensure workspace folders
+        run: |
+          mkdir -p cache/sources
+          mkdir -p cache/portage/distfiles
+          mkdir -p cache/portage/packages
+          mkdir -p artifacts
+          mkdir -p .ci
+
+      - name: Restore source cache
+        uses: actions/cache@v4
+        with:
+          path: cache/sources
+          key: ${{ env.SOURCE_CACHE_KEY_PREFIX }}-${{ hashFiles('02Preparation') }}
+          restore-keys: |
+            ${{ env.SOURCE_CACHE_KEY_PREFIX }}-
+
+      - name: Restore Portage caches
+        uses: actions/cache@v4
+        with:
+          path: |
+            cache/portage/distfiles
+            cache/portage/packages
+          key: ${{ env.PORTAGE_CACHE_KEY_PREFIX }}-${{ runner.os }}-${{ env.GENTOO_IMAGE }}
+          restore-keys: |
+            ${{ env.PORTAGE_CACHE_KEY_PREFIX }}-${{ runner.os }}-
+            ${{ env.PORTAGE_CACHE_KEY_PREFIX }}-
+
+      - name: Download stage1 disk image
+        uses: actions/download-artifact@v4
+        with:
+          name: libero-stage1-img
+          path: .ci
+
+      - name: Decompress stage1 disk image
+        run: |
+          set -euo pipefail
+          xz -d .ci/libero-stage1.img.xz
+          mv .ci/libero-stage1.img .ci/libero.img
+
+      - name: Pull Gentoo base image
+        run: docker pull "${GENTOO_IMAGE}"
+
+      - name: Stage 2 – System build and ISO
+        run: |
+          set -euo pipefail
+          HOST_UID=$(id -u)
+          HOST_GID=$(id -g)
+          docker run --rm --privileged \
+            -v "${PWD}:/workspace" \
+            -v "${PWD}/cache/sources:/workspace/cache/sources" \
+            -v "${PWD}/cache/portage/distfiles:/var/cache/distfiles" \
+            -v "${PWD}/cache/portage/packages:/var/cache/binpkgs" \
+            -w /workspace \
+            -e LIBERO_SOURCE_CACHE=/workspace/cache/sources \
+            -e LIBERO_CACHE_UID="${HOST_UID}" \
+            -e LIBERO_CACHE_GID="${HOST_GID}" \
+            -e HOST_UID="${HOST_UID}" \
+            -e HOST_GID="${HOST_GID}" \
+            -e ISO_ARTIFACT_PATH="${ISO_ARTIFACT_PATH}" \
+            "${GENTOO_IMAGE}" \
+            /bin/bash -lc '
+              set -euo pipefail
+              source /etc/profile
+
+              if ! command -v sudo >/dev/null 2>&1; then
+                cat <<'"'"'EOF'"'"' >/usr/bin/sudo
+#!/bin/sh
+exec "$@"
+EOF
+                chmod +x /usr/bin/sudo
+              fi
+
+              if [ ! -d /var/db/repos/gentoo/profiles ]; then
+                emerge-webrsync
+              fi
+
+              emerge --quiet --oneshot sys-block/parted app-cdr/xorriso dev-vcs/git net-misc/wget rsync
+
+              IMAGE=/workspace/.ci/libero.img
+              if [ ! -f "$IMAGE" ]; then
+                echo "Missing disk image for stage 2" >&2
+                exit 1
+              fi
+
+              loopdev=$(losetup --find --show --partscan "$IMAGE")
+
+              if [[ "$loopdev" =~ (loop[0-9]+|nvme[0-9]+n[0-9]+|mmcblk[0-9]+) ]]; then
+                part_suffix="p"
+              else
+                part_suffix=""
+              fi
+
+              swap_part="${loopdev}${part_suffix}2"
+              root_part="${loopdev}${part_suffix}3"
+
+              cleanup() {
+                set +e
+                swapoff "$swap_part" 2>/dev/null
+                for target in \
+                  /mnt/libero/dev/shm \
+                  /mnt/libero/dev/pts \
+                  /mnt/libero/dev \
+                  /mnt/libero/proc \
+                  /mnt/libero/sys \
+                  /mnt/libero/run \
+                  /mnt/libero; do
+                  umount -l "$target" 2>/dev/null
+                done
+                umount -l /mnt/libero 2>/dev/null
+                losetup -d "$loopdev" 2>/dev/null
+              }
+              trap cleanup EXIT
+
+              mkdir -p /mnt/libero
+              mount "$root_part" /mnt/libero
+              swapon "$swap_part" 2>/dev/null || true
+
+              export LIBERO_AUTOMATION=1
+              export LIBERO_SOURCE_CACHE LIBERO_CACHE_UID LIBERO_CACHE_GID
+
+              echo "::group::Stage2 05PrepChrootEnv"
+              bash ./05PrepChrootEnv
+              echo "::endgroup::"
+
+              install -d /mnt/libero/root/libero-ci
+              for script in 06ChrootEnv 07AdditionalCrossCompilingTools 08BasicSystemSoftware 09SystemConfiguration 10MakingLiberoBootable; do
+                cp "/workspace/${script}" "/mnt/libero/root/libero-ci/${script}"
+                chmod +x "/mnt/libero/root/libero-ci/${script}"
+              done
+
+              sudo chroot /mnt/libero /bin/bash -lc '"'"'
+                set -euo pipefail
+                source /etc/profile
+                export LIBERO_AUTOMATION=1
+                cd /root/libero-ci
+                for script in 06ChrootEnv 07AdditionalCrossCompilingTools 08BasicSystemSoftware 09SystemConfiguration 10MakingLiberoBootable; do
+                  echo "::group::(chroot) ${script}"
+                  bash "./${script}"
+                  echo "::endgroup::"
+                done
+              '"'"'
+
+              mkdir -p /workspace/$(dirname "${ISO_ARTIFACT_PATH}")
+              LIBERO_ISO_OUTPUT=/workspace/"${ISO_ARTIFACT_PATH}" bash ./11MakeBootableISO
+              chown "${HOST_UID:-0}:${HOST_GID:-0}" /workspace/"${ISO_ARTIFACT_PATH}" || true
+              chown -R "${HOST_UID:-0}:${HOST_GID:-0}" /workspace/cache/sources || true
+              ls -lh /workspace/"${ISO_ARTIFACT_PATH}"
+            '
+
+      - name: Remove temporary disk image
+        if: always()
+        run: rm -rf .ci
+
+      - name: Upload ISO artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: libero-iso
+          path: artifacts/libero-server-edition.iso
+          if-no-files-found: error
