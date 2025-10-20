@@ -80,10 +80,7 @@ jobs:
               source /etc/profile
 
               if ! command -v sudo >/dev/null 2>&1; then
-                cat <<'"'"'EOF'"'"' >/usr/bin/sudo
-#!/bin/sh
-exec "$@"
-EOF
+                printf '#!/bin/sh\nexec "$@"\n' >/usr/bin/sudo
                 chmod +x /usr/bin/sudo
               fi
 
@@ -235,10 +232,7 @@ EOF
               source /etc/profile
 
               if ! command -v sudo >/dev/null 2>&1; then
-                cat <<'"'"'EOF'"'"' >/usr/bin/sudo
-#!/bin/sh
-exec "$@"
-EOF
+                printf '#!/bin/sh\nexec "$@"\n' >/usr/bin/sudo
                 chmod +x /usr/bin/sudo
               fi
 
