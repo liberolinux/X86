@@ -11,7 +11,7 @@ permissions:
   contents: read
 
 env:
-  GENTOO_IMAGE: ghcr.io/gentoo/stage3:systemd-i686
+  GENTOO_IMAGE: gentoo-stage3-i486-systemd:latest
   LIBERO_IMAGE_SIZE: 30G
   ISO_ARTIFACT_PATH: artifacts/libero-server-edition.iso
   SOURCE_CACHE_KEY_PREFIX: libero-sources
@@ -19,6 +19,8 @@ env:
 
 jobs:
   prepare:
+    outputs:
+      gentoo_image: ${{ steps.build_stage3.outputs.image }}
     runs-on: ubuntu-latest
     timeout-minutes: 360
 
@@ -53,40 +55,41 @@ jobs:
             ${{ env.PORTAGE_CACHE_KEY_PREFIX }}-${{ runner.os }}-
             ${{ env.PORTAGE_CACHE_KEY_PREFIX }}-
 
-      - name: Authenticate to GitHub Container Registry
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        run: echo "${GITHUB_TOKEN}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
-
-      - name: Select Gentoo base image
-        id: select_image
+      - name: Build Gentoo i486 systemd stage3 image
+        id: build_stage3
         run: |
           set -euo pipefail
-          candidates=(
-            "${GENTOO_IMAGE}"
-            "ghcr.io/gentoo/stage3:openrc-i686"
-            "ghcr.io/gentoo/stage3:openrc-x86"
-            "gentoo/stage3:systemd-i686"
-            "gentoo/stage3:openrc-i686"
-            "gentoo/stage3:openrc-x86"
-          )
-          for image in "${candidates[@]}"; do
-            if [ -z "$image" ]; then
-              continue
-            fi
-            echo "Attempting to pull $image"
-            if docker pull "$image"; then
-              echo "image=$image" >> "$GITHUB_OUTPUT"
-              exit 0
-            fi
-            echo "Failed to pull $image" >&2
-          done
-          echo "No candidate Gentoo stage3 image could be pulled" >&2
-          exit 1
+          build_dir=.ci/stage3-image
+          mkdir -p "$build_dir"
+          pushd "$build_dir" >/dev/null
+
+          base_url="https://distfiles.gentoo.org/releases/x86/autobuilds/current-stage3-i486-systemd"
+          latest_rel=$(curl -fsSL "${base_url}/latest-stage3-i486-systemd.txt" | grep -E '^stage3-.*\.tar\.xz' | tail -n1 | awk '{print $1}')
+          if [ -z "$latest_rel" ]; then
+            echo "Failed to determine latest stage3 build" >&2
+            exit 1
+          fi
+          tarball_url="${base_url}/${latest_rel}"
+          tarball_name=$(basename "$tarball_url")
+
+          curl -fsSLO "$tarball_url"
+          mv "$tarball_name" stage3.tar.xz
+
+          cat > Dockerfile <<'EOF'
+FROM scratch
+ADD stage3.tar.xz /
+CMD ["/bin/bash"]
+EOF
+
+          docker build -t "${GENTOO_IMAGE}" .
+          docker save "${GENTOO_IMAGE}" -o ../gentoo-stage3-i486-systemd.tar
+          popd >/dev/null
+
+          echo "image=${GENTOO_IMAGE}" >> "$GITHUB_OUTPUT"
 
       - name: Stage 1 – Toolchain bootstrap
         env:
-          SELECTED_GENTOO_IMAGE: ${{ steps.select_image.outputs.image }}
+          SELECTED_GENTOO_IMAGE: ${{ steps.build_stage3.outputs.image }}
         run: |
           set -euo pipefail
           HOST_UID=$(id -u)
@@ -184,6 +187,13 @@ jobs:
           path: .ci/libero-stage1.img.xz
           if-no-files-found: error
 
+      - name: Upload Gentoo systemd stage3 image
+        uses: actions/upload-artifact@v4
+        with:
+          name: gentoo-stage3-i486-systemd-image
+          path: .ci/gentoo-stage3-i486-systemd.tar
+          if-no-files-found: error
+
       - name: Cleanup stage1 workspace
         if: always()
         run: rm -rf .ci
@@ -236,40 +246,18 @@ jobs:
           xz -d .ci/libero-stage1.img.xz
           mv .ci/libero-stage1.img .ci/libero.img
 
-      - name: Authenticate to GitHub Container Registry
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        run: echo "${GITHUB_TOKEN}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+      - name: Download Gentoo systemd stage3 image
+        uses: actions/download-artifact@v4
+        with:
+          name: gentoo-stage3-i486-systemd-image
+          path: .ci
 
-      - name: Select Gentoo base image
-        id: select_image_build
-        run: |
-          set -euo pipefail
-          candidates=(
-            "${GENTOO_IMAGE}"
-            "ghcr.io/gentoo/stage3:openrc-i686"
-            "ghcr.io/gentoo/stage3:openrc-x86"
-            "gentoo/stage3:systemd-i686"
-            "gentoo/stage3:openrc-i686"
-            "gentoo/stage3:openrc-x86"
-          )
-          for image in "${candidates[@]}"; do
-            if [ -z "$image" ]; then
-              continue
-            fi
-            echo "Attempting to pull $image"
-            if docker pull "$image"; then
-              echo "image=$image" >> "$GITHUB_OUTPUT"
-              exit 0
-            fi
-            echo "Failed to pull $image" >&2
-          done
-          echo "No candidate Gentoo stage3 image could be pulled" >&2
-          exit 1
+      - name: Load Gentoo systemd stage3 image
+        run: docker load -i .ci/gentoo-stage3-i486-systemd.tar
 
       - name: Stage 2 – System build and ISO
         env:
-          SELECTED_GENTOO_IMAGE: ${{ steps.select_image_build.outputs.image }}
+          SELECTED_GENTOO_IMAGE: ${{ needs.prepare.outputs.gentoo_image }}
         run: |
           set -euo pipefail
           HOST_UID=$(id -u)
