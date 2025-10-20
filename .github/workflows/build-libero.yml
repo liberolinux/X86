@@ -16,7 +16,7 @@ env:
     python3-distutils python3-setuptools perl tar patch diffutils findutils gzip sed
     grep coreutils git curl wget rsync parted xorriso sudo ca-certificates
 jobs:
-  01Requirements:
+  Script_01Requirements:
     name: 01Requirements
     runs-on: ubuntu-latest
     timeout-minutes: 60
@@ -55,11 +55,11 @@ jobs:
     - name: Cleanup
       if: always()
       run: rm -rf .ci
-  02Preparation:
+  Script_02Preparation:
     name: 02Preparation
     runs-on: ubuntu-latest
     timeout-minutes: 360
-    needs: 01Requirements
+    needs: Script_01Requirements
     steps:
     - uses: actions/checkout@v4
     - name: Prepare workspace
@@ -115,11 +115,11 @@ jobs:
     - name: Cleanup
       if: always()
       run: rm -rf .ci
-  03CrossCompiler:
+  Script_03CrossCompiler:
     name: 03CrossCompiler
     runs-on: ubuntu-latest
     timeout-minutes: 360
-    needs: 02Preparation
+    needs: Script_02Preparation
     steps:
     - uses: actions/checkout@v4
     - name: Prepare workspace
@@ -188,11 +188,11 @@ jobs:
     - name: Cleanup
       if: always()
       run: rm -rf .ci
-  04CrossCompilingTools:
+  Script_04CrossCompilingTools:
     name: 04CrossCompilingTools
     runs-on: ubuntu-latest
     timeout-minutes: 360
-    needs: 03CrossCompiler
+    needs: Script_03CrossCompiler
     steps:
     - uses: actions/checkout@v4
     - name: Prepare workspace
@@ -261,11 +261,11 @@ jobs:
     - name: Cleanup
       if: always()
       run: rm -rf .ci
-  05PrepChrootEnv:
+  Script_05PrepChrootEnv:
     name: 05PrepChrootEnv
     runs-on: ubuntu-latest
     timeout-minutes: 360
-    needs: 04CrossCompilingTools
+    needs: Script_04CrossCompilingTools
     steps:
     - uses: actions/checkout@v4
     - name: Prepare workspace
@@ -334,11 +334,11 @@ jobs:
     - name: Cleanup
       if: always()
       run: rm -rf .ci
-  06ChrootEnv:
+  Script_06ChrootEnv:
     name: 06ChrootEnv
     runs-on: ubuntu-latest
     timeout-minutes: 360
-    needs: 05PrepChrootEnv
+    needs: Script_05PrepChrootEnv
     steps:
     - uses: actions/checkout@v4
     - name: Prepare workspace
@@ -407,11 +407,11 @@ jobs:
     - name: Cleanup
       if: always()
       run: rm -rf .ci
-  07AdditionalCrossCompilingTools:
+  Script_07AdditionalCrossCompilingTools:
     name: 07AdditionalCrossCompilingTools
     runs-on: ubuntu-latest
     timeout-minutes: 360
-    needs: 06ChrootEnv
+    needs: Script_06ChrootEnv
     steps:
     - uses: actions/checkout@v4
     - name: Prepare workspace
@@ -480,11 +480,11 @@ jobs:
     - name: Cleanup
       if: always()
       run: rm -rf .ci
-  08BasicSystemSoftware:
+  Script_08BasicSystemSoftware:
     name: 08BasicSystemSoftware
     runs-on: ubuntu-latest
     timeout-minutes: 360
-    needs: 07AdditionalCrossCompilingTools
+    needs: Script_07AdditionalCrossCompilingTools
     steps:
     - uses: actions/checkout@v4
     - name: Prepare workspace
@@ -553,11 +553,11 @@ jobs:
     - name: Cleanup
       if: always()
       run: rm -rf .ci
-  09SystemConfiguration:
+  Script_09SystemConfiguration:
     name: 09SystemConfiguration
     runs-on: ubuntu-latest
     timeout-minutes: 360
-    needs: 08BasicSystemSoftware
+    needs: Script_08BasicSystemSoftware
     steps:
     - uses: actions/checkout@v4
     - name: Prepare workspace
@@ -626,11 +626,11 @@ jobs:
     - name: Cleanup
       if: always()
       run: rm -rf .ci
-  10MakingLiberoBootable:
+  Script_10MakingLiberoBootable:
     name: 10MakingLiberoBootable
     runs-on: ubuntu-latest
     timeout-minutes: 360
-    needs: 09SystemConfiguration
+    needs: Script_09SystemConfiguration
     steps:
     - uses: actions/checkout@v4
     - name: Prepare workspace
@@ -699,11 +699,11 @@ jobs:
     - name: Cleanup
       if: always()
       run: rm -rf .ci
-  11MakeBootableISO:
+  Script_11MakeBootableISO:
     name: 11MakeBootableISO
     runs-on: ubuntu-latest
     timeout-minutes: 360
-    needs: 10MakingLiberoBootable
+    needs: Script_10MakingLiberoBootable
     steps:
     - uses: actions/checkout@v4
     - name: Prepare workspace
