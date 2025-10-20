@@ -28,6 +28,7 @@ export PATH=$LIBERO/tools/bin:$PATH
 export CONFIG_SITE=$LIBERO/usr/share/config.site
 export LIBERO_TGT=$(uname -m)-libero-linux-gnu
 LIBERO_AUTOMATION="${LIBERO_AUTOMATION:-0}"
+LIBERO_USE_PROOT="${LIBERO_USE_PROOT:-0}"
 
 # If 05PrepChrootEnv.log does not exists then create it
 if [ ! -f "$LIBERO/sources/05PrepChrootEnv.log" ]; then
@@ -70,25 +71,29 @@ if [ ! -d "$LIBERO/run" ]; then
     sudo mkdir -pv "$LIBERO/run"
 fi
 
-# First, unmount the virtual kernel file systems
-if mountpoint -q $LIBERO/dev; then
-    sudo mount -fv $LIBERO/dev
-fi
+if [ "$LIBERO_USE_PROOT" != "1" ]; then
+    # First, unmount the virtual kernel file systems
+    if mountpoint -q $LIBERO/dev; then
+        sudo mount -fv $LIBERO/dev
+    fi
 
-if mountpoint -q $LIBERO/dev/pts; then
-    sudo umount -fv $LIBERO/dev/pts
-fi
+    if mountpoint -q $LIBERO/dev/pts; then
+        sudo umount -fv $LIBERO/dev/pts
+    fi
 
-if mountpoint -q $LIBERO/proc; then
-    sudo umount -fv $LIBERO/proc
-fi
+    if mountpoint -q $LIBERO/proc; then
+        sudo umount -fv $LIBERO/proc
+    fi
 
-if mountpoint -q $LIBERO/sys; then
-    sudo umount -fv $LIBERO/sys
-fi
+    if mountpoint -q $LIBERO/sys; then
+        sudo umount -fv $LIBERO/sys
+    fi
 
-if mountpoint -q $LIBERO/run; then
-    sudo umount -fv $LIBERO/run
+    if mountpoint -q $LIBERO/run; then
+        sudo umount -fv $LIBERO/run
+    fi
+else
+    echo "Proot mode enabled: skipping host virtual filesystem unmounts."
 fi
 
 # Creating Initial Device Nodes
@@ -100,35 +105,39 @@ sudo mknod -m 666 $LIBERO/dev/urandom c 1 9
 sudo mknod -m 666 $LIBERO/dev/tty c 5 0
 sudo mknod -m 600 $LIBERO/dev/console c 5 1
 
-# Then, mount the virtual kernel file systems
-if ! mountpoint -q $LIBERO/dev; then
-    sudo mount -v --bind /dev $LIBERO/dev
-fi
+if [ "$LIBERO_USE_PROOT" != "1" ]; then
+    # Then, mount the virtual kernel file systems
+    if ! mountpoint -q $LIBERO/dev; then
+        sudo mount -v --bind /dev $LIBERO/dev
+    fi
 
-if ! mountpoint -q $LIBERO/dev/pts; then
-    sudo mount -v --bind /dev/pts $LIBERO/dev/pts
-fi
+    if ! mountpoint -q $LIBERO/dev/pts; then
+        sudo mount -v --bind /dev/pts $LIBERO/dev/pts
+    fi
 
-if ! mountpoint -q $LIBERO/proc; then
-    sudo mount -vt proc proc $LIBERO/proc
-fi
+    if ! mountpoint -q $LIBERO/proc; then
+        sudo mount -vt proc proc $LIBERO/proc
+    fi
 
-if ! mountpoint -q $LIBERO/sys; then
-    sudo mount -vt sysfs sysfs $LIBERO/sys
-fi
+    if ! mountpoint -q $LIBERO/sys; then
+        sudo mount -vt sysfs sysfs $LIBERO/sys
+    fi
 
-if ! mountpoint -q $LIBERO/run; then
-    sudo mount -vt tmpfs tmpfs $LIBERO/run
-fi
+    if ! mountpoint -q $LIBERO/run; then
+        sudo mount -vt tmpfs tmpfs $LIBERO/run
+    fi
 
-# In other host systems /dev/shm is a mount point for a tmpfs.
-# In that case the mount of /dev above will only create /dev/shm as
-# a directory in the chroot environment.
-# In this situation we must explicitly mount a tmpfs
-if [ -h $LIBERO/dev/shm ]; then
-    sudo mkdir -pv $LIBERO/$(readlink $LIBERO/dev/shm)
+    # In other host systems /dev/shm is a mount point for a tmpfs.
+    # In that case the mount of /dev above will only create /dev/shm as
+    # a directory in the chroot environment.
+    # In this situation we must explicitly mount a tmpfs
+    if [ -h $LIBERO/dev/shm ]; then
+        sudo mkdir -pv $LIBERO/$(readlink $LIBERO/dev/shm)
+    else
+        sudo mount -vt tmpfs -o nosuid,nodev tmpfs $LIBERO/dev/shm
+    fi
 else
-    sudo mount -vt tmpfs -o nosuid,nodev tmpfs $LIBERO/dev/shm
+    echo "Proot mode enabled: skipping host virtual filesystem mounts."
 fi
 
 # End Counnting Time of Script
@@ -148,12 +157,16 @@ fi
 echo ""
 
 if [ "$LIBERO_AUTOMATION" != "1" ]; then
-    sudo chroot "$LIBERO" /usr/bin/env -i       \
-        HOME=/root                              \
-        TERM="$TERM"                            \
-        PS1='(libero chroot) \u:\w\$ '          \
-        PATH=/usr/bin:/usr/sbin                 \
-        /bin/bash --login
+    if [ "$LIBERO_USE_PROOT" = "1" ]; then
+        echo "Proot mode active: launch an interactive shell manually if required."
+    else
+        sudo chroot "$LIBERO" /usr/bin/env -i       \
+            HOME=/root                              \
+            TERM="$TERM"                            \
+            PS1='(libero chroot) \u:\w\$ '          \
+            PATH=/usr/bin:/usr/sbin                 \
+            /bin/bash --login
+    fi
 else
     echo "Automation mode active: skipping interactive chroot shell drop-in."
 fi

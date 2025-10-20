@@ -1,4 +1,5 @@
 #!/bin/bash
+set -euo pipefail
 
 # Copyright © 1999-2025 Gerard Beekmans
 # Linux® is a registered trademark of Linus Torvalds.
@@ -21,18 +22,96 @@
 # Start Counting Time of Script
 start_time=$(date +%s)
 
+LIBERO_ROOTFS="${LIBERO:-/mnt/libero}"
 ISO_OUTPUT="${LIBERO_ISO_OUTPUT:-$HOME/Downloads/libero-server-edition.iso}"
+ISO_LABEL="${LIBERO_ISO_LABEL:-${LIBERO_ROOT_LABEL:-LIBERO}}"
+LIBERO_USE_PROOT="${LIBERO_USE_PROOT:-1}"
+PROOT_BIN="${PROOT_BIN:-proot}"
+GRUB_MODULES="${LIBERO_GRUB_MODULES:-biosdisk part_msdos iso9660 normal linux}"
+
 sudo mkdir -p "$(dirname "$ISO_OUTPUT")"
 
-sudo xorriso -as mkisofs -o "$ISO_OUTPUT" \
-        -iso-level 3 -R -J -l \
-        -eltorito-alt-boot \
-        -e EFI/BOOT/grubx64.efi \
-        -no-emul-boot \
-        -isohybrid-gpt-basdat \
-        /mnt/libero
+work_dir="$(mktemp -d)"
+eltorito_dest="$LIBERO_ROOTFS/boot/grub/eltorito.img"
 
-# End Counnting Time of Script
+cleanup() {
+  rm -rf "$work_dir"
+  sudo rm -f "$eltorito_dest"
+  sudo rm -f "$LIBERO_ROOTFS/tmp/grub-core.img"
+}
+trap cleanup EXIT
+
+run_in_rootfs() {
+  local command="$1"
+  if [ "$LIBERO_USE_PROOT" = "1" ] && command -v "$PROOT_BIN" >/dev/null 2>&1; then
+    "$PROOT_BIN" -0 -r "$LIBERO_ROOTFS" -w /root \
+      /bin/bash -lc "$command"
+  else
+    sudo chroot "$LIBERO_ROOTFS" /bin/bash -lc "$command"
+  fi
+}
+
+sudo mkdir -p "$LIBERO_ROOTFS/tmp"
+
+core_inside="/tmp/grub-core.img"
+standalone_cmd=$(
+  cat <<EOF
+/usr/bin/env -i PATH=/usr/bin:/usr/sbin:/bin \
+  grub-mkstandalone -O i386-pc \
+    --modules="${GRUB_MODULES}" \
+    --locales="" \
+    --fonts="" \
+    --output="${core_inside}" \
+    "boot/grub/grub.cfg=/boot/grub/grub.cfg"
+EOF
+)
+
+run_in_rootfs "$standalone_cmd"
+
+core_host="$LIBERO_ROOTFS${core_inside}"
+if [ ! -f "$core_host" ]; then
+  echo "Failed to generate GRUB core image at ${core_host}" >&2
+  exit 1
+fi
+
+cp "$core_host" "$work_dir/core.img"
+sudo rm -f "$core_host"
+
+cdboot_img="$LIBERO_ROOTFS/usr/lib/grub/i386-pc/cdboot.img"
+if [ ! -f "$cdboot_img" ]; then
+  echo "Missing cdboot image: $cdboot_img" >&2
+  exit 1
+fi
+
+cat "$cdboot_img" "$work_dir/core.img" > "$work_dir/eltorito.img"
+
+sudo mkdir -p "$(dirname "$eltorito_dest")"
+sudo install -m 0644 "$work_dir/eltorito.img" "$eltorito_dest"
+
+iso_args=(
+  -as mkisofs
+  -o "$ISO_OUTPUT"
+  -iso-level 3
+  -R
+  -J
+  -l
+  -V "$ISO_LABEL"
+  -b boot/grub/eltorito.img
+  -no-emul-boot
+  -boot-load-size 4
+  -boot-info-table
+)
+
+boot_hybrid_img="$LIBERO_ROOTFS/usr/lib/grub/i386-pc/boot_hybrid.img"
+if [ -f "$boot_hybrid_img" ]; then
+  iso_args+=(-isohybrid-mbr "$boot_hybrid_img")
+fi
+
+iso_args+=("$LIBERO_ROOTFS")
+
+sudo xorriso "${iso_args[@]}"
+
+# End Counting Time of Script
 end_time=$(date +%s)
 time_elapsed=$((end_time - start_time))
 hours=$((time_elapsed / 3600))

@@ -21,12 +21,24 @@
 # Start Counting Time of Script
 start_time=$(date +%s)
 
-DEVICE=/dev/sdX
-
 linux_version="6.12.50"
 
 # Set the environment variables
 export LC_ALL=POSIX
+LIBERO_AUTOMATION="${LIBERO_AUTOMATION:-0}"
+LIBERO_ROOT_LABEL="${LIBERO_ROOT_LABEL:-LIBERO}"
+LIBERO_SWAP_LABEL="${LIBERO_SWAP_LABEL:-SWAP}"
+LIBERO_ROOT_IDENTIFIER="${LIBERO_ROOT_IDENTIFIER:-LABEL=${LIBERO_ROOT_LABEL}}"
+LIBERO_SWAP_IDENTIFIER="${LIBERO_SWAP_IDENTIFIER:-LABEL=${LIBERO_SWAP_LABEL}}"
+LIBERO_GRUB_SEARCH_LABEL="${LIBERO_GRUB_SEARCH_LABEL:-${LIBERO_ROOT_LABEL}}"
+LIBERO_GRUB_ROOT_PARAM="${LIBERO_GRUB_ROOT_PARAM:-LABEL=${LIBERO_ROOT_LABEL}}"
+LIBERO_KERNEL_ARCH="${LIBERO_KERNEL_ARCH:-i386}"
+
+pause_if_interactive() {
+    if [ "$LIBERO_AUTOMATION" != "1" ]; then
+        read -t 10 -p "Press Enter to continue..." || true
+    fi
+}
 
 # Set the cross-compile flags
 # export CFLAGS="-Oz -pipe -march=x86-64 -fomit-frame-pointer -fstack-clash-protection \
@@ -40,35 +52,23 @@ echo ""
 echo "Final Chapter - Making Libero Bootable"
 
 echo ""
-read -t 10 -p "Press Enter to continue..." || true
+pause_if_interactive
 
 # Creating the /etc/fstab File
 # You can modify this for your needs
 echo "Creating the /etc/fstab File"
 
-SWAP_PARTITION=$(blkid -s UUID -o value ${DEVICE}2)
-ROOT_PARTITION=$(blkid -s UUID -o value ${DEVICE}3)
-
-cat > /etc/fstab << "EOF"
+cat > /etc/fstab << EOF
 # Begin /etc/fstab
 
 # file system  mount-point  type     options             dump  fsck
 #                                                              order
 
-UUID=<swap>     none         swap    sw                                 0       0
-UUID=<root>     /            ext4    rw,noatime,relatime,discard            0       1
+$LIBERO_SWAP_IDENTIFIER     none         swap    sw                      0       0
+$LIBERO_ROOT_IDENTIFIER     /            ext4    rw,noatime,relatime,discard  0       1
 
 # End /etc/fstab
 EOF
-echo ""
-echo "[Done]"
-
-echo ""
-echo "Write the Value of UUID Partitions Using 'sed' command"
-
-sed -i "s/<swap>/${SWAP_PARTITION}/g" /etc/fstab
-sed -i "s/<root>/${ROOT_PARTITION}/g" /etc/fstab
-
 echo ""
 echo "[Done]"
 
@@ -87,13 +87,13 @@ cd /sources/linux-$linux_version
 # Copy current directory of Linux Kernel Firmware to the desired Directory
 cp -Rv ../linux-firmware/* /lib/firmware/
 
-make mrproper
+make ARCH="$LIBERO_KERNEL_ARCH" mrproper
 
-make allmodconfig
+make ARCH="$LIBERO_KERNEL_ARCH" allmodconfig
 
-make
+make ARCH="$LIBERO_KERNEL_ARCH"
 
-make modules_install
+make ARCH="$LIBERO_KERNEL_ARCH" modules_install
 
 # The path to the kernel image may vary depending on the platform being used.
 # The filename below can be changed to suit your taste, but the stem of the filename
@@ -119,11 +119,11 @@ rm -rf /sources/linux-$linux_version
 
 echo ""
 echo "[Done]"
-read -t 10 -p "Press Enter to continue..." || true
+pause_if_interactive
 
 # GRUB Configuration File
 
-mkdir /boot/grub
+mkdir -p /boot/grub
 
 echo "GRUB Configuration File"
 cat > /boot/grub/grub.cfg << EOF
@@ -139,35 +139,24 @@ set menu_color_highlight=white/cyan
 set gfxpayload=keep
 
 insmod all_video
-insmod part_gpt
 insmod part_msdos
+insmod iso9660
 insmod ext2
-search --no-floppy --fs-uuid --set=root=UUID="<root>"
+search --no-floppy --label ${LIBERO_GRUB_SEARCH_LABEL} --set=root
 
 menuentry "Libero GNU/Linux"  {
   echo    'Loading Linux ...'
-  linux   /vmlinuz root=UUID="<root>" rw
+  linux   /vmlinuz root=${LIBERO_GRUB_ROOT_PARAM} rw
 }
 EOF
 echo "[Done]"
 
 echo ""
-echo "Change Values from Grub Configuration using 'sed'"
-
-sed -i "s/<root>/${ROOT_PARTITION}/g" /boot/grub/grub.cfg
+echo "Bootloader binaries will be added during ISO creation; skipping grub-install."
 
 echo ""
 echo "[Done]"
-
-# Boot Configuration with GRUB
-echo ""
-echo "Boot Configuration with GRUB"
-grub-install --target=i386-pc $DEVICE
-echo "[Done]"
-
-echo ""
-echo "[Done]"
-read -t 10 -p "Press Enter to continue..." || true
+pause_if_interactive
 
 echo ""
 echo "Status of the system with respect to the Linux Standards Base (LSB)"
@@ -188,7 +177,7 @@ EOF
 
 echo ""
 echo "[Done]"
-read -t 10 -p "Press Enter to continue..." || true
+pause_if_interactive
 
 # End Counnting Time of Script
 end_time=$(date +%s)

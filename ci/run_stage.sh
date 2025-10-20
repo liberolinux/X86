@@ -2,184 +2,162 @@
 set -euo pipefail
 
 stage="${1:?stage number required}"
-LIBERO_IMAGE_SIZE="${LIBERO_IMAGE_SIZE:-30G}"
-COMMON_APT_PACKAGES="${COMMON_APT_PACKAGES:-build-essential binutils bison gawk texinfo xz-utils m4 python3 python3-distutils python3-setuptools perl tar patch diffutils findutils gzip sed grep coreutils git curl wget rsync parted xorriso sudo ca-certificates}"
+ROOTFS_BASE="${ROOTFS_BASE:-/workspace/rootfs}"
+LIBERO_PATH="/mnt/libero"
+SOURCE_CACHE="/workspace/cache/sources"
+ISO_OUTPUT="/workspace/${ISO_ARTIFACT_PATH:-artifacts/libero-server-edition.iso}"
+COMMON_APT_PACKAGES_DEFAULT="build-essential binutils bison gawk texinfo xz-utils m4 python3 python3-distutils python3-setuptools perl tar patch diffutils findutils gzip sed grep coreutils git curl wget rsync parted xorriso sudo ca-certificates udev proot"
+COMMON_APT_PACKAGES="${COMMON_APT_PACKAGES:-$COMMON_APT_PACKAGES_DEFAULT}"
 HOST_UID="${HOST_UID:-0}"
 HOST_GID="${HOST_GID:-0}"
-IMAGE_PATH="/workspace/.ci/libero.img"
-MNT_DIR="/mnt/libero"
-CI_DIR="/workspace/cache/sources"
-bind_mounts=()
+USE_PROOT="${USE_PROOT:-1}"
+PROOT_BIN="${PROOT_BIN:-proot}"
 
 install_dependencies() {
   apt-get update
-  DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ${COMMON_APT_PACKAGES}
+  DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends $COMMON_APT_PACKAGES
   apt-get clean
 }
 
-detect_part_suffix() {
-  local dev="$1"
-  if [[ "$dev" =~ (loop[0-9]+|nvme[0-9]+n[0-9]+|mmcblk[0-9]+) ]]; then
-    printf 'p'
-  else
-    printf ''
+setup_rootfs() {
+  if [[ "$stage" == "02" ]]; then
+    rm -rf "$ROOTFS_BASE"
   fi
+  mkdir -p "$ROOTFS_BASE"
+  rm -rf "$LIBERO_PATH"
+  ln -s "$ROOTFS_BASE" "$LIBERO_PATH"
 }
 
-attach_disk() {
-  loopdev=$(losetup --find --show --partscan "$IMAGE_PATH")
-  if [[ -z "$loopdev" ]]; then
-    echo "Failed to attach loop device for $IMAGE_PATH" >&2
-    exit 1
-  fi
-  part_suffix=$(detect_part_suffix "$loopdev")
-  swap_part="${loopdev}${part_suffix}2"
-  root_part="${loopdev}${part_suffix}3"
-}
-
-mount_root() {
-  mkdir -p "$MNT_DIR"
-  mount "$root_part" "$MNT_DIR"
-}
-
-enable_swap() {
-  swapon "$swap_part" 2>/dev/null || true
+export_environment() {
+  export LIBERO_AUTOMATION=1
+  export LIBERO_SKIP_PARTITIONS=1
+  export LIBERO_SOURCE_CACHE="$SOURCE_CACHE"
+  export LIBERO_CACHE_UID="$HOST_UID"
+  export LIBERO_CACHE_GID="$HOST_GID"
+  export LIBERO_ISO_OUTPUT="$ISO_OUTPUT"
+  export LIBERO_USE_PROOT="$USE_PROOT"
 }
 
 setup_chroot_mounts() {
-  mount --bind /dev "$MNT_DIR/dev"
-  bind_mounts+=("$MNT_DIR/dev")
-  mount --bind /dev/pts "$MNT_DIR/dev/pts"
-  bind_mounts+=("$MNT_DIR/dev/pts")
-  mount -t proc proc "$MNT_DIR/proc"
-  bind_mounts+=("$MNT_DIR/proc")
-  mount -t sysfs sysfs "$MNT_DIR/sys"
-  bind_mounts+=("$MNT_DIR/sys")
-  mount -t tmpfs tmpfs "$MNT_DIR/run"
-  bind_mounts+=("$MNT_DIR/run")
-  if [[ -h "$MNT_DIR/dev/shm" ]]; then
-    mkdir -p "$MNT_DIR/$(readlink "$MNT_DIR/dev/shm")"
+  bind_targets=(
+    "$LIBERO_PATH/dev"
+    "$LIBERO_PATH/dev/pts"
+    "$LIBERO_PATH/proc"
+    "$LIBERO_PATH/sys"
+    "$LIBERO_PATH/run"
+  )
+
+  mkdir -p "$LIBERO_PATH/dev" "$LIBERO_PATH/dev/pts" "$LIBERO_PATH/proc" \
+           "$LIBERO_PATH/sys" "$LIBERO_PATH/run"
+
+  mount --bind /dev "$LIBERO_PATH/dev"
+  mount --bind /dev/pts "$LIBERO_PATH/dev/pts"
+  mount -t proc proc "$LIBERO_PATH/proc"
+  mount -t sysfs sysfs "$LIBERO_PATH/sys"
+  mount -t tmpfs tmpfs "$LIBERO_PATH/run"
+
+  if [[ -h "$LIBERO_PATH/dev/shm" ]]; then
+    mkdir -p "$LIBERO_PATH/$(readlink "$LIBERO_PATH/dev/shm")"
   else
-    mount -t tmpfs -o nosuid,nodev tmpfs "$MNT_DIR/dev/shm"
-    bind_mounts+=("$MNT_DIR/dev/shm")
+    mount -t tmpfs -o nosuid,nodev tmpfs "$LIBERO_PATH/dev/shm"
+    bind_targets+=("$LIBERO_PATH/dev/shm")
   fi
 }
 
-cleanup() {
-  set +e
-  if [[ -n "${bind_mounts[*]:-}" ]]; then
-    for (( idx=${#bind_mounts[@]}-1 ; idx>=0 ; idx-- )); do
-      umount -l "${bind_mounts[idx]}" 2>/dev/null
-    done
-  fi
-  umount -l "$MNT_DIR" 2>/dev/null
-  swapoff "$swap_part" 2>/dev/null
-  losetup -d "$loopdev" 2>/dev/null
+teardown_mounts() {
+  local targets=(
+    "$LIBERO_PATH/dev/shm"
+    "$LIBERO_PATH/dev/pts"
+    "$LIBERO_PATH/dev"
+    "$LIBERO_PATH/proc"
+    "$LIBERO_PATH/sys"
+    "$LIBERO_PATH/run"
+  )
+  for target in "${targets[@]}"; do
+    umount -l "$target" 2>/dev/null || true
+  done
 }
 
 run_host_script() {
-  local script_name="$1"
-  bash "./${script_name}"
+  bash "./${1}"
 }
 
 run_chroot_script() {
   local script_name="$1"
-  local runner_path="$MNT_DIR/root/libero-ci"
+  local runner_path="$LIBERO_PATH/root/libero-ci"
 
   mkdir -p "$runner_path"
-  cp "/workspace/${script_name}" "${runner_path}/${script_name}"
-  chmod +x "${runner_path}/${script_name}"
+  cp "/workspace/${script_name}" "$runner_path/${script_name}"
+  chmod +x "$runner_path/${script_name}"
 
-  printf '%s\n' \
-    '#!/bin/bash' \
-    'set -euo pipefail' \
-    'source /etc/profile' \
-    'export LIBERO_AUTOMATION=1' \
-    'cd /root/libero-ci' \
-    "bash ./${script_name}" \
-    > "${runner_path}/chroot-run.sh"
-  chmod +x "${runner_path}/chroot-run.sh"
+  local quoted_script
+  quoted_script=$(printf '%q' "./${script_name}")
+  local chroot_command="set -euo pipefail; source /etc/profile; export LIBERO_AUTOMATION=1; cd /root/libero-ci; bash ${quoted_script}"
 
-  sudo chroot "$MNT_DIR" /bin/bash /root/libero-ci/chroot-run.sh
+  if [[ "$USE_PROOT" == "1" ]]; then
+    local proot_args=("$PROOT_BIN" -0 -r "$LIBERO_PATH" -w /root/libero-ci)
+    local proot_binds=("/proc" "/sys" "/dev" "/dev/pts" "/run" "/tmp")
+
+    for bind_path in "${proot_binds[@]}"; do
+      if [[ -e "$bind_path" ]]; then
+        proot_args+=(-b "${bind_path}")
+      fi
+    done
+
+    "${proot_args[@]}" /bin/bash -lc "$chroot_command"
+  else
+    setup_chroot_mounts
+    sudo chroot "$LIBERO_PATH" /bin/bash -lc "$chroot_command"
+    teardown_mounts
+  fi
 }
 
 finalize_sources() {
-  mkdir -p "$CI_DIR"
-  chown -R "$HOST_UID:$HOST_GID" "$CI_DIR" || true
+  mkdir -p "$SOURCE_CACHE"
+  chown -R "$HOST_UID:$HOST_GID" "$SOURCE_CACHE" || true
 }
 
 install_dependencies
-
-declare -A stage_scripts=(
-  ["01"]="01Requirements"
-  ["02"]="02Preparation"
-  ["03"]="03CrossCompiler"
-  ["04"]="04CrossCompilingTools"
-  ["05"]="05PrepChrootEnv"
-  ["06"]="06ChrootEnv"
-  ["07"]="07AdditionalCrossCompilingTools"
-  ["08"]="08BasicSystemSoftware"
-  ["09"]="09SystemConfiguration"
-  ["10"]="10MakingLiberoBootable"
-  ["11"]="11MakeBootableISO"
-)
-
-script_name="${stage_scripts[$stage]:-}"
-if [[ -z "$script_name" ]]; then
-  echo "Unknown stage: $stage" >&2
-  exit 1
-fi
+setup_rootfs
+export_environment
 
 case "$stage" in
   "01")
-    run_host_script "$script_name"
+    run_host_script "01Requirements"
+    finalize_sources
     exit 0
     ;;
   "02")
-    mkdir -p /workspace/.ci
-    truncate -s "$LIBERO_IMAGE_SIZE" "$IMAGE_PATH"
+    run_host_script "02Preparation"
+    finalize_sources
+    exit 0
     ;;
+  "03") stage_script="03CrossCompiler" ;;
+  "04") stage_script="04CrossCompilingTools" ;;
+  "05") stage_script="05PrepChrootEnv" ;;
+  "06") stage_script="06ChrootEnv" ;;
+  "07") stage_script="07AdditionalCrossCompilingTools" ;;
+  "08") stage_script="08BasicSystemSoftware" ;;
+  "09") stage_script="09SystemConfiguration" ;;
+  "10") stage_script="10MakingLiberoBootable" ;;
+  "11") stage_script="11MakeBootableISO" ;;
   *)
-    if [[ ! -f "$IMAGE_PATH" ]]; then
-      echo "Disk image $IMAGE_PATH not found" >&2
-      exit 1
-    fi
+    echo "Unknown stage: $stage" >&2
+    exit 1
     ;;
 esac
 
-attach_disk
-trap cleanup EXIT
-
-export DEVICE="$loopdev"
-export LIBERO_AUTOMATION=1
-export LIBERO_SOURCE_CACHE="$CI_DIR"
-export LIBERO_CACHE_UID="$HOST_UID"
-export LIBERO_CACHE_GID="$HOST_GID"
-export LIBERO_ISO_OUTPUT="/workspace/${ISO_ARTIFACT_PATH:-artifacts/libero-server-edition.iso}"
-
-if [[ "$stage" != "02" ]]; then
-  mount_root
-fi
-
-if [[ "$stage" =~ ^0[3-9]$ || "$stage" =~ ^1[01]$ ]]; then
-  enable_swap
-fi
-
-if [[ "$stage" =~ ^0[3-9]$ || "$stage" =~ ^1[01]$ ]]; then
-  sudo partprobe "$loopdev"
-  sleep 1
-fi
-
 if [[ "$stage" =~ ^0[6-9]$ || "$stage" == "10" ]]; then
-  setup_chroot_mounts
-  run_chroot_script "$script_name"
+  run_chroot_script "$stage_script"
 else
-  run_host_script "$script_name"
+  run_host_script "$stage_script"
+  if [[ "$stage" == "05" && "$USE_PROOT" != "1" ]]; then
+    teardown_mounts
+  fi
 fi
 
 finalize_sources
 
 if [[ "$stage" == "11" ]]; then
-  iso_path="${ISO_ARTIFACT_PATH:-artifacts/libero-server-edition.iso}"
-  chown "$HOST_UID:$HOST_GID" "/workspace/$iso_path" 2>/dev/null || true
+  chown "$HOST_UID:$HOST_GID" "$ISO_OUTPUT" 2>/dev/null || true
 fi
