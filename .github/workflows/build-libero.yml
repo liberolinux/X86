@@ -115,7 +115,7 @@ jobs:
                 if [ ! -d /usr/bin ]; then
                   mkdir -p /usr/bin
                 fi
-                printf '%s\n' '#!/bin/sh' "exec \"\$@\"" >/usr/bin/sudo
+                printf '%s\n' '#!/bin/sh' 'exec "$@"' >/usr/bin/sudo
                 chmod +x /usr/bin/sudo
               fi
 
@@ -285,7 +285,7 @@ jobs:
                 if [ ! -d /usr/bin ]; then
                   mkdir -p /usr/bin
                 fi
-                printf '%s\n' '#!/bin/sh' "exec \"\$@\"" >/usr/bin/sudo
+                printf '%s\n' '#!/bin/sh' 'exec "$@"' >/usr/bin/sudo
                 chmod +x /usr/bin/sudo
               fi
 
