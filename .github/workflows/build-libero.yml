@@ -94,6 +94,70 @@ jobs:
           HOST_UID=$(id -u)
           HOST_GID=$(id -g)
           rm -f .ci/libero.img .ci/libero-stage1.img .ci/libero-stage1.img.xz
+          mkdir -p .ci
+
+          printf '%s\n' \
+            '#!/bin/bash' \
+            'set -euo pipefail' \
+            'source /etc/profile' \
+            '' \
+            'if ! command -v sudo >/dev/null 2>&1; then' \
+            '  if [ ! -d /usr/bin ]; then' \
+            '    mkdir -p /usr/bin' \
+            '  fi' \
+            '  printf '\''%s\n'\'' '\''#!/bin/sh'\'' '\''exec "$@"'\'' >/usr/bin/sudo' \
+            '  chmod +x /usr/bin/sudo' \
+            'fi' \
+            '' \
+            'if [ ! -d /var/db/repos/gentoo/profiles ]; then' \
+            '  emerge-webrsync' \
+            'fi' \
+            '' \
+            'emerge --quiet --oneshot sys-block/parted app-cdr/xorriso dev-vcs/git net-misc/wget rsync' \
+            '' \
+            'mkdir -p /workspace/.ci' \
+            'IMAGE=/workspace/.ci/libero.img' \
+            'truncate -s "${LIBERO_IMAGE_SIZE:-25G}" "$IMAGE"' \
+            'loopdev=$(losetup --find --show --partscan "$IMAGE")' \
+            '' \
+            'if [[ "$loopdev" =~ (loop[0-9]+|nvme[0-9]+n[0-9]+|mmcblk[0-9]+) ]]; then' \
+            '  part_suffix="p"' \
+            'else' \
+            '  part_suffix=""' \
+            'fi' \
+            '' \
+            'swap_part="${loopdev}${part_suffix}2"' \
+            'root_part="${loopdev}${part_suffix}3"' \
+            '' \
+            'cleanup() {' \
+            '  set +e' \
+            '  swapoff "$swap_part" 2>/dev/null' \
+            '  for target in /mnt/libero/dev/shm /mnt/libero/dev/pts /mnt/libero/dev /mnt/libero/proc /mnt/libero/sys /mnt/libero/run /mnt/libero; do' \
+            '    umount -l "$target" 2>/dev/null' \
+            '  done' \
+            '  losetup -d "$loopdev" 2>/dev/null' \
+            '}' \
+            'trap cleanup EXIT' \
+            '' \
+            'export DEVICE="$loopdev"' \
+            'export LIBERO_AUTOMATION=1' \
+            'export LIBERO_SOURCE_CACHE LIBERO_CACHE_UID LIBERO_CACHE_GID' \
+            '' \
+            'for script in 01Requirements 02Preparation 03CrossCompiler 04CrossCompilingTools; do' \
+            '  echo "::group::Stage1 ${script}"' \
+            '  bash "./${script}"' \
+            '  echo "::endgroup::"' \
+            'done' \
+            '' \
+            'echo "::group::Stage1 05PrepChrootEnv"' \
+            'bash ./05PrepChrootEnv' \
+            'echo "::endgroup::"' \
+            '' \
+            'mkdir -p /workspace/cache/sources' \
+            'chown -R "${HOST_UID:-0}:${HOST_GID:-0}" /workspace/cache/sources || true' \
+            > .ci/stage1.sh
+          chmod +x .ci/stage1.sh
+
           docker run --rm --privileged \
             -v "${PWD}:/workspace" \
             -v "${PWD}/cache/sources:/workspace/cache/sources" \
@@ -107,72 +171,7 @@ jobs:
             -e HOST_UID="${HOST_UID}" \
             -e HOST_GID="${HOST_GID}" \
             "${SELECTED_GENTOO_IMAGE}" \
-            /bin/bash -lc '
-              set -euo pipefail
-              source /etc/profile
-
-              if ! command -v sudo >/dev/null 2>&1; then
-                if [ ! -d /usr/bin ]; then
-                  mkdir -p /usr/bin
-                fi
-                printf '%s\n' '#!/bin/sh' 'exec "$@"' >/usr/bin/sudo
-                chmod +x /usr/bin/sudo
-              fi
-
-              if [ ! -d /var/db/repos/gentoo/profiles ]; then
-                emerge-webrsync
-              fi
-
-              emerge --quiet --oneshot sys-block/parted app-cdr/xorriso dev-vcs/git net-misc/wget rsync
-
-              mkdir -p /workspace/.ci
-              IMAGE=/workspace/.ci/libero.img
-              truncate -s "${LIBERO_IMAGE_SIZE:-25G}" "$IMAGE"
-              loopdev=$(losetup --find --show --partscan "$IMAGE")
-
-              if [[ "$loopdev" =~ (loop[0-9]+|nvme[0-9]+n[0-9]+|mmcblk[0-9]+) ]]; then
-                part_suffix="p"
-              else
-                part_suffix=""
-              fi
-
-              swap_part="${loopdev}${part_suffix}2"
-              root_part="${loopdev}${part_suffix}3"
-
-              cleanup() {
-                set +e
-                swapoff "$swap_part" 2>/dev/null
-                for target in \
-                  /mnt/libero/dev/shm \
-                  /mnt/libero/dev/pts \
-                  /mnt/libero/dev \
-                  /mnt/libero/proc \
-                  /mnt/libero/sys \
-                  /mnt/libero/run \
-                  /mnt/libero; do
-                  umount -l "$target" 2>/dev/null
-                done
-                losetup -d "$loopdev" 2>/dev/null
-              }
-              trap cleanup EXIT
-
-              export DEVICE="$loopdev"
-              export LIBERO_AUTOMATION=1
-              export LIBERO_SOURCE_CACHE LIBERO_CACHE_UID LIBERO_CACHE_GID
-
-              for script in 01Requirements 02Preparation 03CrossCompiler 04CrossCompilingTools; do
-                echo "::group::Stage1 ${script}"
-                bash "./${script}"
-                echo "::endgroup::"
-              done
-
-              echo "::group::Stage1 05PrepChrootEnv"
-              bash ./05PrepChrootEnv
-              echo "::endgroup::"
-
-              mkdir -p /workspace/cache/sources
-              chown -R "${HOST_UID:-0}:${HOST_GID:-0}" /workspace/cache/sources || true
-            '
+            /workspace/.ci/stage1.sh
 
       - name: Compress stage1 disk image
         run: |
@@ -264,6 +263,84 @@ jobs:
           set -euo pipefail
           HOST_UID=$(id -u)
           HOST_GID=$(id -g)
+          mkdir -p .ci
+          printf '%s\n' \
+            '#!/bin/bash' \
+            'set -euo pipefail' \
+            'source /etc/profile' \
+            '' \
+            'if ! command -v sudo >/dev/null 2>&1; then' \
+            '  if [ ! -d /usr/bin ]; then' \
+            '    mkdir -p /usr/bin' \
+            '  fi' \
+            '  printf '\''%s\n'\'' '\''#!/bin/sh'\'' '\''exec "$@"'\'' >/usr/bin/sudo' \
+            '  chmod +x /usr/bin/sudo' \
+            'fi' \
+            '' \
+            'if [ ! -d /var/db/repos/gentoo/profiles ]; then' \
+            '  emerge-webrsync' \
+            'fi' \
+            '' \
+            'emerge --quiet --oneshot sys-block/parted app-cdr/xorriso dev-vcs/git net-misc/wget rsync' \
+            '' \
+            'IMAGE=/workspace/.ci/libero.img' \
+            'if [ ! -f "$IMAGE" ]; then' \
+            '  echo "Missing disk image for stage 2" >&2' \
+            '  exit 1' \
+            'fi' \
+            '' \
+            'loopdev=$(losetup --find --show --partscan "$IMAGE")' \
+            '' \
+            'if [[ "$loopdev" =~ (loop[0-9]+|nvme[0-9]+n[0-9]+|mmcblk[0-9]+) ]]; then' \
+            '  part_suffix="p"' \
+            'else' \
+            '  part_suffix=""' \
+            'fi' \
+            '' \
+            'swap_part="${loopdev}${part_suffix}2"' \
+            'root_part="${loopdev}${part_suffix}3"' \
+            '' \
+            'cleanup() {' \
+            '  set +e' \
+            '  swapoff "$swap_part" 2>/dev/null' \
+            '  for target in /mnt/libero/dev/shm /mnt/libero/dev/pts /mnt/libero/dev /mnt/libero/proc /mnt/libero/sys /mnt/libero/run /mnt/libero; do' \
+            '    umount -l "$target" 2>/dev/null' \
+            '  done' \
+            '  losetup -d "$loopdev" 2>/dev/null' \
+            '}' \
+            'trap cleanup EXIT' \
+            '' \
+            'mkdir -p /mnt/libero' \
+            'mount "$root_part" /mnt/libero' \
+            'swapon "$swap_part" 2>/dev/null || true' \
+            '' \
+            'export LIBERO_AUTOMATION=1' \
+            'export LIBERO_SOURCE_CACHE LIBERO_CACHE_UID LIBERO_CACHE_GID' \
+            '' \
+            'echo "::group::Stage2 05PrepChrootEnv"' \
+            'bash ./05PrepChrootEnv' \
+            'echo "::endgroup::"' \
+            '' \
+            'install -d /mnt/libero/root/libero-ci' \
+            'for script in 06ChrootEnv 07AdditionalCrossCompilingTools 08BasicSystemSoftware 09SystemConfiguration 10MakingLiberoBootable; do' \
+            '  cp "/workspace/${script}" "/mnt/libero/root/libero-ci/${script}"' \
+            '  chmod +x "/mnt/libero/root/libero-ci/${script}"' \
+            'done' \
+            '' \
+            'printf '\''%s\n'\'' '\''#!/bin/bash'\'' '\''set -euo pipefail'\'' '\''source /etc/profile'\'' '\''export LIBERO_AUTOMATION=1'\'' '\''cd /root/libero-ci'\'' '\''for script in 06ChrootEnv 07AdditionalCrossCompilingTools 08BasicSystemSoftware 09SystemConfiguration 10MakingLiberoBootable; do'\'' '\''  echo "::group::(chroot) ${script}"'\'' '\''  bash "./${script}"'\'' '\''  echo "::endgroup::"'\'' '\''done'\'' >/mnt/libero/root/libero-ci/chroot-run.sh' \
+            'chmod +x /mnt/libero/root/libero-ci/chroot-run.sh' \
+            '' \
+            'sudo chroot /mnt/libero /bin/bash /root/libero-ci/chroot-run.sh' \
+            '' \
+            'mkdir -p /workspace/$(dirname "${ISO_ARTIFACT_PATH}")' \
+            'LIBERO_ISO_OUTPUT=/workspace/"${ISO_ARTIFACT_PATH}" bash ./11MakeBootableISO' \
+            'chown "${HOST_UID:-0}:${HOST_GID:-0}" /workspace/"${ISO_ARTIFACT_PATH}" || true' \
+            'chown -R "${HOST_UID:-0}:${HOST_GID:-0}" /workspace/cache/sources || true' \
+            'ls -lh /workspace/"${ISO_ARTIFACT_PATH}"' \
+            > .ci/stage2.sh
+
+          chmod +x .ci/stage2.sh
+
           docker run --rm --privileged \
             -v "${PWD}:/workspace" \
             -v "${PWD}/cache/sources:/workspace/cache/sources" \
@@ -277,94 +354,7 @@ jobs:
             -e HOST_GID="${HOST_GID}" \
             -e ISO_ARTIFACT_PATH="${ISO_ARTIFACT_PATH}" \
             "${SELECTED_GENTOO_IMAGE}" \
-            /bin/bash -lc '
-              set -euo pipefail
-              source /etc/profile
-
-              if ! command -v sudo >/dev/null 2>&1; then
-                if [ ! -d /usr/bin ]; then
-                  mkdir -p /usr/bin
-                fi
-                printf '%s\n' '#!/bin/sh' 'exec "$@"' >/usr/bin/sudo
-                chmod +x /usr/bin/sudo
-              fi
-
-              if [ ! -d /var/db/repos/gentoo/profiles ]; then
-                emerge-webrsync
-              fi
-
-              emerge --quiet --oneshot sys-block/parted app-cdr/xorriso dev-vcs/git net-misc/wget rsync
-
-              IMAGE=/workspace/.ci/libero.img
-              if [ ! -f "$IMAGE" ]; then
-                echo "Missing disk image for stage 2" >&2
-                exit 1
-              fi
-
-              loopdev=$(losetup --find --show --partscan "$IMAGE")
-
-              if [[ "$loopdev" =~ (loop[0-9]+|nvme[0-9]+n[0-9]+|mmcblk[0-9]+) ]]; then
-                part_suffix="p"
-              else
-                part_suffix=""
-              fi
-
-              swap_part="${loopdev}${part_suffix}2"
-              root_part="${loopdev}${part_suffix}3"
-
-              cleanup() {
-                set +e
-                swapoff "$swap_part" 2>/dev/null
-                for target in \
-                  /mnt/libero/dev/shm \
-                  /mnt/libero/dev/pts \
-                  /mnt/libero/dev \
-                  /mnt/libero/proc \
-                  /mnt/libero/sys \
-                  /mnt/libero/run \
-                  /mnt/libero; do
-                  umount -l "$target" 2>/dev/null
-                done
-                umount -l /mnt/libero 2>/dev/null
-                losetup -d "$loopdev" 2>/dev/null
-              }
-              trap cleanup EXIT
-
-              mkdir -p /mnt/libero
-              mount "$root_part" /mnt/libero
-              swapon "$swap_part" 2>/dev/null || true
-
-              export LIBERO_AUTOMATION=1
-              export LIBERO_SOURCE_CACHE LIBERO_CACHE_UID LIBERO_CACHE_GID
-
-              echo "::group::Stage2 05PrepChrootEnv"
-              bash ./05PrepChrootEnv
-              echo "::endgroup::"
-
-              install -d /mnt/libero/root/libero-ci
-              for script in 06ChrootEnv 07AdditionalCrossCompilingTools 08BasicSystemSoftware 09SystemConfiguration 10MakingLiberoBootable; do
-                cp "/workspace/${script}" "/mnt/libero/root/libero-ci/${script}"
-                chmod +x "/mnt/libero/root/libero-ci/${script}"
-              done
-
-              sudo chroot /mnt/libero /bin/bash -lc '"'"'
-                set -euo pipefail
-                source /etc/profile
-                export LIBERO_AUTOMATION=1
-                cd /root/libero-ci
-                for script in 06ChrootEnv 07AdditionalCrossCompilingTools 08BasicSystemSoftware 09SystemConfiguration 10MakingLiberoBootable; do
-                  echo "::group::(chroot) ${script}"
-                  bash "./${script}"
-                  echo "::endgroup::"
-                done
-              '"'"'
-
-              mkdir -p /workspace/$(dirname "${ISO_ARTIFACT_PATH}")
-              LIBERO_ISO_OUTPUT=/workspace/"${ISO_ARTIFACT_PATH}" bash ./11MakeBootableISO
-              chown "${HOST_UID:-0}:${HOST_GID:-0}" /workspace/"${ISO_ARTIFACT_PATH}" || true
-              chown -R "${HOST_UID:-0}:${HOST_GID:-0}" /workspace/cache/sources || true
-              ls -lh /workspace/"${ISO_ARTIFACT_PATH}"
-            '
+            /workspace/.ci/stage2.sh
 
       - name: Remove temporary disk image
         if: always()
