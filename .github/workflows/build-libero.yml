@@ -347,6 +347,8 @@ jobs:
         name: libero-rootfs-05
         path: .ci/libero-rootfs-05.tar.gz
         if-no-files-found: error
+    - name: Cleanup
+      if: always()
       run: rm -rf .ci
   Script_06ChrootEnv:
     name: 06ChrootEnv
@@ -366,6 +368,11 @@ jobs:
     - name: Restore source cache
       uses: actions/cache@v4
       with:
+        path: cache/sources
+        key: ${{ env.SOURCE_CACHE_KEY_PREFIX }}-${{ hashFiles('02Preparation') }}
+        restore-keys: '${{ env.SOURCE_CACHE_KEY_PREFIX }}-
+
+          '
     - name: Download rootfs from stage 05
       uses: actions/download-artifact@v4
       with:
@@ -376,12 +383,6 @@ jobs:
         set -euo pipefail
         mkdir -p rootfs
         tar -xzf .ci/libero-rootfs-05.tar.gz -C rootfs
-    
-        mv .ci/libero-disk-05.img.xz .ci/libero.img.xz
-
-        xz -d .ci/libero.img.xz
-
-        '
     - name: Run stage 06
       run: 'docker run --rm --privileged \
 
@@ -669,6 +670,11 @@ jobs:
     - name: Restore source cache
       uses: actions/cache@v4
       with:
+        path: cache/sources
+        key: ${{ env.SOURCE_CACHE_KEY_PREFIX }}-${{ hashFiles('02Preparation') }}
+        restore-keys: '${{ env.SOURCE_CACHE_KEY_PREFIX }}-
+
+          '
     - name: Download rootfs from stage 09
       uses: actions/download-artifact@v4
       with:
@@ -726,6 +732,8 @@ jobs:
         name: libero-rootfs-10
         path: .ci/libero-rootfs-10.tar.gz
         if-no-files-found: error
+    - name: Cleanup
+      if: always()
       run: rm -rf .ci
   Script_11MakeBootableISO:
     name: 11MakeBootableISO
@@ -745,6 +753,11 @@ jobs:
     - name: Restore source cache
       uses: actions/cache@v4
       with:
+        path: cache/sources
+        key: ${{ env.SOURCE_CACHE_KEY_PREFIX }}-${{ hashFiles('02Preparation') }}
+        restore-keys: '${{ env.SOURCE_CACHE_KEY_PREFIX }}-
+
+          '
     - name: Download rootfs from stage 10
       uses: actions/download-artifact@v4
       with:
