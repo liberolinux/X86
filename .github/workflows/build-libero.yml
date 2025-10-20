@@ -102,15 +102,20 @@ jobs:
         /workspace/ci/run_stage.sh 02
 
         '
-    - name: Package disk image
-      run: "set -euo pipefail\nif [ -f .ci/libero.img ]; then\n  xz -T0 .ci/libero.img\n\
-        \  mv .ci/libero.img.xz .ci/libero-disk-02.img.xz\nelse\n  echo \"Disk image\
-        \ not found\" >&2\n  exit 1\nfi\n"
-    - name: Upload disk artifact
+    - name: Package rootfs
+      run: |
+        set -euo pipefail
+        if [ -d rootfs ]; then
+          tar -czf .ci/libero-rootfs-02.tar.gz -C rootfs .
+        else
+          echo "Rootfs not found" >&2
+          exit 1
+        fi
+    - name: Upload rootfs artifact
       uses: actions/upload-artifact@v4
       with:
-        name: libero-disk-02
-        path: .ci/libero-disk-02.img.xz
+        name: libero-rootfs-02
+        path: .ci/libero-rootfs-02.tar.gz
         if-no-files-found: error
     - name: Cleanup
       if: always()
@@ -138,19 +143,17 @@ jobs:
         restore-keys: '${{ env.SOURCE_CACHE_KEY_PREFIX }}-
 
           '
-    - name: Download disk from stage 02
+    - name: Download rootfs from stage 02
       uses: actions/download-artifact@v4
       with:
-        name: libero-disk-02
+        name: libero-rootfs-02
         path: .ci
-    - name: Decompress disk image
-      run: 'set -euo pipefail
-
-        mv .ci/libero-disk-02.img.xz .ci/libero.img.xz
-
-        xz -d .ci/libero.img.xz
-
-        '
+    - name: Extract rootfs
+      run: |
+        set -euo pipefail
+        mkdir -p rootfs
+        tar -xzf .ci/libero-rootfs-02.tar.gz -C rootfs
+    
     - name: Run stage 03
       run: 'docker run --rm --privileged \
 
@@ -175,15 +178,20 @@ jobs:
         /workspace/ci/run_stage.sh 03
 
         '
-    - name: Package disk image
-      run: "set -euo pipefail\nif [ -f .ci/libero.img ]; then\n  xz -T0 .ci/libero.img\n\
-        \  mv .ci/libero.img.xz .ci/libero-disk-03.img.xz\nelse\n  echo \"Disk image\
-        \ not found\" >&2\n  exit 1\nfi\n"
-    - name: Upload disk artifact
+    - name: Package rootfs
+      run: |
+        set -euo pipefail
+        if [ -d rootfs ]; then
+          tar -czf .ci/libero-rootfs-03.tar.gz -C rootfs .
+        else
+          echo "Rootfs not found" >&2
+          exit 1
+        fi
+    - name: Upload rootfs artifact
       uses: actions/upload-artifact@v4
       with:
-        name: libero-disk-03
-        path: .ci/libero-disk-03.img.xz
+        name: libero-rootfs-03
+        path: .ci/libero-rootfs-03.tar.gz
         if-no-files-found: error
     - name: Cleanup
       if: always()
@@ -211,19 +219,17 @@ jobs:
         restore-keys: '${{ env.SOURCE_CACHE_KEY_PREFIX }}-
 
           '
-    - name: Download disk from stage 03
+    - name: Download rootfs from stage 03
       uses: actions/download-artifact@v4
       with:
-        name: libero-disk-03
+        name: libero-rootfs-03
         path: .ci
-    - name: Decompress disk image
-      run: 'set -euo pipefail
-
-        mv .ci/libero-disk-03.img.xz .ci/libero.img.xz
-
-        xz -d .ci/libero.img.xz
-
-        '
+    - name: Extract rootfs
+      run: |
+        set -euo pipefail
+        mkdir -p rootfs
+        tar -xzf .ci/libero-rootfs-03.tar.gz -C rootfs
+    
     - name: Run stage 04
       run: 'docker run --rm --privileged \
 
@@ -248,15 +254,20 @@ jobs:
         /workspace/ci/run_stage.sh 04
 
         '
-    - name: Package disk image
-      run: "set -euo pipefail\nif [ -f .ci/libero.img ]; then\n  xz -T0 .ci/libero.img\n\
-        \  mv .ci/libero.img.xz .ci/libero-disk-04.img.xz\nelse\n  echo \"Disk image\
-        \ not found\" >&2\n  exit 1\nfi\n"
-    - name: Upload disk artifact
+    - name: Package rootfs
+      run: |
+        set -euo pipefail
+        if [ -d rootfs ]; then
+          tar -czf .ci/libero-rootfs-04.tar.gz -C rootfs .
+        else
+          echo "Rootfs not found" >&2
+          exit 1
+        fi
+    - name: Upload rootfs artifact
       uses: actions/upload-artifact@v4
       with:
-        name: libero-disk-04
-        path: .ci/libero-disk-04.img.xz
+        name: libero-rootfs-04
+        path: .ci/libero-rootfs-04.tar.gz
         if-no-files-found: error
     - name: Cleanup
       if: always()
@@ -284,19 +295,17 @@ jobs:
         restore-keys: '${{ env.SOURCE_CACHE_KEY_PREFIX }}-
 
           '
-    - name: Download disk from stage 04
+    - name: Download rootfs from stage 04
       uses: actions/download-artifact@v4
       with:
-        name: libero-disk-04
+        name: libero-rootfs-04
         path: .ci
-    - name: Decompress disk image
-      run: 'set -euo pipefail
-
-        mv .ci/libero-disk-04.img.xz .ci/libero.img.xz
-
-        xz -d .ci/libero.img.xz
-
-        '
+    - name: Extract rootfs
+      run: |
+        set -euo pipefail
+        mkdir -p rootfs
+        tar -xzf .ci/libero-rootfs-04.tar.gz -C rootfs
+    
     - name: Run stage 05
       run: 'docker run --rm --privileged \
 
@@ -320,19 +329,24 @@ jobs:
 
         /workspace/ci/run_stage.sh 05
 
+        /workspace/ci/run_stage.sh 05
+
         '
-    - name: Package disk image
-      run: "set -euo pipefail\nif [ -f .ci/libero.img ]; then\n  xz -T0 .ci/libero.img\n\
-        \  mv .ci/libero.img.xz .ci/libero-disk-05.img.xz\nelse\n  echo \"Disk image\
-        \ not found\" >&2\n  exit 1\nfi\n"
-    - name: Upload disk artifact
+    - name: Package rootfs
+      run: |
+        set -euo pipefail
+        if [ -d rootfs ]; then
+          tar -czf .ci/libero-rootfs-05.tar.gz -C rootfs .
+        else
+          echo "Rootfs not found" >&2
+          exit 1
+        fi
+    - name: Upload rootfs artifact
       uses: actions/upload-artifact@v4
       with:
-        name: libero-disk-05
-        path: .ci/libero-disk-05.img.xz
+        name: libero-rootfs-05
+        path: .ci/libero-rootfs-05.tar.gz
         if-no-files-found: error
-    - name: Cleanup
-      if: always()
       run: rm -rf .ci
   Script_06ChrootEnv:
     name: 06ChrootEnv
@@ -352,19 +366,17 @@ jobs:
     - name: Restore source cache
       uses: actions/cache@v4
       with:
-        path: cache/sources
-        key: ${{ env.SOURCE_CACHE_KEY_PREFIX }}-${{ hashFiles('02Preparation') }}
-        restore-keys: '${{ env.SOURCE_CACHE_KEY_PREFIX }}-
-
-          '
-    - name: Download disk from stage 05
+    - name: Download rootfs from stage 05
       uses: actions/download-artifact@v4
       with:
-        name: libero-disk-05
+        name: libero-rootfs-05
         path: .ci
-    - name: Decompress disk image
-      run: 'set -euo pipefail
-
+    - name: Extract rootfs
+      run: |
+        set -euo pipefail
+        mkdir -p rootfs
+        tar -xzf .ci/libero-rootfs-05.tar.gz -C rootfs
+    
         mv .ci/libero-disk-05.img.xz .ci/libero.img.xz
 
         xz -d .ci/libero.img.xz
@@ -394,15 +406,20 @@ jobs:
         /workspace/ci/run_stage.sh 06
 
         '
-    - name: Package disk image
-      run: "set -euo pipefail\nif [ -f .ci/libero.img ]; then\n  xz -T0 .ci/libero.img\n\
-        \  mv .ci/libero.img.xz .ci/libero-disk-06.img.xz\nelse\n  echo \"Disk image\
-        \ not found\" >&2\n  exit 1\nfi\n"
-    - name: Upload disk artifact
+    - name: Package rootfs
+      run: |
+        set -euo pipefail
+        if [ -d rootfs ]; then
+          tar -czf .ci/libero-rootfs-06.tar.gz -C rootfs .
+        else
+          echo "Rootfs not found" >&2
+          exit 1
+        fi
+    - name: Upload rootfs artifact
       uses: actions/upload-artifact@v4
       with:
-        name: libero-disk-06
-        path: .ci/libero-disk-06.img.xz
+        name: libero-rootfs-06
+        path: .ci/libero-rootfs-06.tar.gz
         if-no-files-found: error
     - name: Cleanup
       if: always()
@@ -430,19 +447,17 @@ jobs:
         restore-keys: '${{ env.SOURCE_CACHE_KEY_PREFIX }}-
 
           '
-    - name: Download disk from stage 06
+    - name: Download rootfs from stage 06
       uses: actions/download-artifact@v4
       with:
-        name: libero-disk-06
+        name: libero-rootfs-06
         path: .ci
-    - name: Decompress disk image
-      run: 'set -euo pipefail
-
-        mv .ci/libero-disk-06.img.xz .ci/libero.img.xz
-
-        xz -d .ci/libero.img.xz
-
-        '
+    - name: Extract rootfs
+      run: |
+        set -euo pipefail
+        mkdir -p rootfs
+        tar -xzf .ci/libero-rootfs-06.tar.gz -C rootfs
+    
     - name: Run stage 07
       run: 'docker run --rm --privileged \
 
@@ -467,15 +482,20 @@ jobs:
         /workspace/ci/run_stage.sh 07
 
         '
-    - name: Package disk image
-      run: "set -euo pipefail\nif [ -f .ci/libero.img ]; then\n  xz -T0 .ci/libero.img\n\
-        \  mv .ci/libero.img.xz .ci/libero-disk-07.img.xz\nelse\n  echo \"Disk image\
-        \ not found\" >&2\n  exit 1\nfi\n"
-    - name: Upload disk artifact
+    - name: Package rootfs
+      run: |
+        set -euo pipefail
+        if [ -d rootfs ]; then
+          tar -czf .ci/libero-rootfs-07.tar.gz -C rootfs .
+        else
+          echo "Rootfs not found" >&2
+          exit 1
+        fi
+    - name: Upload rootfs artifact
       uses: actions/upload-artifact@v4
       with:
-        name: libero-disk-07
-        path: .ci/libero-disk-07.img.xz
+        name: libero-rootfs-07
+        path: .ci/libero-rootfs-07.tar.gz
         if-no-files-found: error
     - name: Cleanup
       if: always()
@@ -503,19 +523,17 @@ jobs:
         restore-keys: '${{ env.SOURCE_CACHE_KEY_PREFIX }}-
 
           '
-    - name: Download disk from stage 07
+    - name: Download rootfs from stage 07
       uses: actions/download-artifact@v4
       with:
-        name: libero-disk-07
+        name: libero-rootfs-07
         path: .ci
-    - name: Decompress disk image
-      run: 'set -euo pipefail
-
-        mv .ci/libero-disk-07.img.xz .ci/libero.img.xz
-
-        xz -d .ci/libero.img.xz
-
-        '
+    - name: Extract rootfs
+      run: |
+        set -euo pipefail
+        mkdir -p rootfs
+        tar -xzf .ci/libero-rootfs-07.tar.gz -C rootfs
+    
     - name: Run stage 08
       run: 'docker run --rm --privileged \
 
@@ -540,15 +558,20 @@ jobs:
         /workspace/ci/run_stage.sh 08
 
         '
-    - name: Package disk image
-      run: "set -euo pipefail\nif [ -f .ci/libero.img ]; then\n  xz -T0 .ci/libero.img\n\
-        \  mv .ci/libero.img.xz .ci/libero-disk-08.img.xz\nelse\n  echo \"Disk image\
-        \ not found\" >&2\n  exit 1\nfi\n"
-    - name: Upload disk artifact
+    - name: Package rootfs
+      run: |
+        set -euo pipefail
+        if [ -d rootfs ]; then
+          tar -czf .ci/libero-rootfs-08.tar.gz -C rootfs .
+        else
+          echo "Rootfs not found" >&2
+          exit 1
+        fi
+    - name: Upload rootfs artifact
       uses: actions/upload-artifact@v4
       with:
-        name: libero-disk-08
-        path: .ci/libero-disk-08.img.xz
+        name: libero-rootfs-08
+        path: .ci/libero-rootfs-08.tar.gz
         if-no-files-found: error
     - name: Cleanup
       if: always()
@@ -576,19 +599,16 @@ jobs:
         restore-keys: '${{ env.SOURCE_CACHE_KEY_PREFIX }}-
 
           '
-    - name: Download disk from stage 08
+    - name: Download rootfs from stage 08
       uses: actions/download-artifact@v4
       with:
-        name: libero-disk-08
+        name: libero-rootfs-08
         path: .ci
-    - name: Decompress disk image
-      run: 'set -euo pipefail
-
-        mv .ci/libero-disk-08.img.xz .ci/libero.img.xz
-
-        xz -d .ci/libero.img.xz
-
-        '
+    - name: Extract rootfs
+      run: |
+        set -euo pipefail
+        mkdir -p rootfs
+        tar -xzf .ci/libero-rootfs-08.tar.gz -C rootfs
     - name: Run stage 09
       run: 'docker run --rm --privileged \
 
@@ -613,15 +633,20 @@ jobs:
         /workspace/ci/run_stage.sh 09
 
         '
-    - name: Package disk image
-      run: "set -euo pipefail\nif [ -f .ci/libero.img ]; then\n  xz -T0 .ci/libero.img\n\
-        \  mv .ci/libero.img.xz .ci/libero-disk-09.img.xz\nelse\n  echo \"Disk image\
-        \ not found\" >&2\n  exit 1\nfi\n"
-    - name: Upload disk artifact
+    - name: Package rootfs
+      run: |
+        set -euo pipefail
+        if [ -d rootfs ]; then
+          tar -czf .ci/libero-rootfs-09.tar.gz -C rootfs .
+        else
+          echo "Rootfs not found" >&2
+          exit 1
+        fi
+    - name: Upload rootfs artifact
       uses: actions/upload-artifact@v4
       with:
-        name: libero-disk-09
-        path: .ci/libero-disk-09.img.xz
+        name: libero-rootfs-09
+        path: .ci/libero-rootfs-09.tar.gz
         if-no-files-found: error
     - name: Cleanup
       if: always()
@@ -644,19 +669,17 @@ jobs:
     - name: Restore source cache
       uses: actions/cache@v4
       with:
-        path: cache/sources
-        key: ${{ env.SOURCE_CACHE_KEY_PREFIX }}-${{ hashFiles('02Preparation') }}
-        restore-keys: '${{ env.SOURCE_CACHE_KEY_PREFIX }}-
-
-          '
-    - name: Download disk from stage 09
+    - name: Download rootfs from stage 09
       uses: actions/download-artifact@v4
       with:
-        name: libero-disk-09
+        name: libero-rootfs-09
         path: .ci
-    - name: Decompress disk image
-      run: 'set -euo pipefail
-
+    - name: Extract rootfs
+      run: |
+        set -euo pipefail
+        mkdir -p rootfs
+        tar -xzf .ci/libero-rootfs-09.tar.gz -C rootfs
+    
         mv .ci/libero-disk-09.img.xz .ci/libero.img.xz
 
         xz -d .ci/libero.img.xz
@@ -685,19 +708,24 @@ jobs:
 
         /workspace/ci/run_stage.sh 10
 
+        /workspace/ci/run_stage.sh 10
+
         '
-    - name: Package disk image
-      run: "set -euo pipefail\nif [ -f .ci/libero.img ]; then\n  xz -T0 .ci/libero.img\n\
-        \  mv .ci/libero.img.xz .ci/libero-disk-10.img.xz\nelse\n  echo \"Disk image\
-        \ not found\" >&2\n  exit 1\nfi\n"
-    - name: Upload disk artifact
+    - name: Package rootfs
+      run: |
+        set -euo pipefail
+        if [ -d rootfs ]; then
+          tar -czf .ci/libero-rootfs-10.tar.gz -C rootfs .
+        else
+          echo "Rootfs not found" >&2
+          exit 1
+        fi
+    - name: Upload rootfs artifact
       uses: actions/upload-artifact@v4
       with:
-        name: libero-disk-10
-        path: .ci/libero-disk-10.img.xz
+        name: libero-rootfs-10
+        path: .ci/libero-rootfs-10.tar.gz
         if-no-files-found: error
-    - name: Cleanup
-      if: always()
       run: rm -rf .ci
   Script_11MakeBootableISO:
     name: 11MakeBootableISO
@@ -717,19 +745,17 @@ jobs:
     - name: Restore source cache
       uses: actions/cache@v4
       with:
-        path: cache/sources
-        key: ${{ env.SOURCE_CACHE_KEY_PREFIX }}-${{ hashFiles('02Preparation') }}
-        restore-keys: '${{ env.SOURCE_CACHE_KEY_PREFIX }}-
-
-          '
-    - name: Download disk from stage 10
+    - name: Download rootfs from stage 10
       uses: actions/download-artifact@v4
       with:
-        name: libero-disk-10
+        name: libero-rootfs-10
         path: .ci
-    - name: Decompress disk image
-      run: 'set -euo pipefail
-
+    - name: Extract rootfs
+      run: |
+        set -euo pipefail
+        mkdir -p rootfs
+        tar -xzf .ci/libero-rootfs-10.tar.gz -C rootfs
+    
         mv .ci/libero-disk-10.img.xz .ci/libero.img.xz
 
         xz -d .ci/libero.img.xz
