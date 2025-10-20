@@ -146,6 +146,13 @@ esac
 attach_disk
 trap cleanup EXIT
 
+export DEVICE="$loopdev"
+export LIBERO_AUTOMATION=1
+export LIBERO_SOURCE_CACHE="$CI_DIR"
+export LIBERO_CACHE_UID="$HOST_UID"
+export LIBERO_CACHE_GID="$HOST_GID"
+export LIBERO_ISO_OUTPUT="/workspace/${ISO_ARTIFACT_PATH:-artifacts/libero-server-edition.iso}"
+
 if [[ "$stage" != "02" ]]; then
   mount_root
 fi
