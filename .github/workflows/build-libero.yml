@@ -53,6 +53,11 @@ jobs:
             ${{ env.PORTAGE_CACHE_KEY_PREFIX }}-${{ runner.os }}-
             ${{ env.PORTAGE_CACHE_KEY_PREFIX }}-
 
+      - name: Authenticate to GitHub Container Registry
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: echo "${GITHUB_TOKEN}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
       - name: Pull Gentoo base image
         run: docker pull "${GENTOO_IMAGE}"
 
@@ -205,6 +210,11 @@ jobs:
           set -euo pipefail
           xz -d .ci/libero-stage1.img.xz
           mv .ci/libero-stage1.img .ci/libero.img
+
+      - name: Authenticate to GitHub Container Registry
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: echo "${GITHUB_TOKEN}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
 
       - name: Pull Gentoo base image
         run: docker pull "${GENTOO_IMAGE}"
