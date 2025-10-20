@@ -113,7 +113,7 @@ jobs:
             '  emerge-webrsync' \
             'fi' \
             '' \
-            'emerge --quiet --oneshot sys-block/parted app-cdr/xorriso dev-vcs/git net-misc/wget rsync' \
+            'emerge --quiet --oneshot sys-block/parted dev-libs/libisoburn dev-vcs/git net-misc/wget rsync' \
             '' \
             'mkdir -p /workspace/.ci' \
             'IMAGE=/workspace/.ci/libero.img' \
