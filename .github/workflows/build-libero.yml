@@ -1,368 +1,770 @@
 name: Build Libero ISO
-
 on:
-  workflow_dispatch:
+  workflow_dispatch: null
   push:
     branches:
-      - main
-  pull_request:
-
+    - main
+  pull_request: null
 permissions:
   contents: read
-
 env:
-  GENTOO_IMAGE: gentoo-stage3-i486-systemd:latest
+  DEBIAN_IMAGE: i386/debian:bookworm
   LIBERO_IMAGE_SIZE: 30G
   ISO_ARTIFACT_PATH: artifacts/libero-server-edition.iso
   SOURCE_CACHE_KEY_PREFIX: libero-sources
-  PORTAGE_CACHE_KEY_PREFIX: gentoo-portage
-
+  COMMON_APT_PACKAGES: build-essential binutils bison gawk texinfo xz-utils m4 python3
+    python3-distutils python3-setuptools perl tar patch diffutils findutils gzip sed
+    grep coreutils git curl wget rsync parted xorriso sudo ca-certificates
 jobs:
-  prepare:
-    outputs:
-      gentoo_image: ${{ steps.build_stage3.outputs.image }}
+  01Requirements:
+    name: 01Requirements
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+    - uses: actions/checkout@v4
+    - name: Prepare workspace
+      run: 'set -euo pipefail
+
+        mkdir -p cache/sources artifacts .ci
+
+        chmod +x ci/run_stage.sh
+
+        '
+    - name: Restore source cache
+      uses: actions/cache@v4
+      with:
+        path: cache/sources
+        key: ${{ env.SOURCE_CACHE_KEY_PREFIX }}-${{ hashFiles('02Preparation') }}
+        restore-keys: '${{ env.SOURCE_CACHE_KEY_PREFIX }}-
+
+          '
+    - name: Run stage 01
+      run: 'docker run --rm \
+
+        -v "${PWD}:/workspace" \
+
+        -w /workspace \
+
+        -e COMMON_APT_PACKAGES="${COMMON_APT_PACKAGES}" \
+
+        "${DEBIAN_IMAGE}" \
+
+        /workspace/ci/run_stage.sh 01
+
+        '
+    - name: Cleanup
+      if: always()
+      run: rm -rf .ci
+  02Preparation:
+    name: 02Preparation
     runs-on: ubuntu-latest
     timeout-minutes: 360
-
+    needs: 01Requirements
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+    - uses: actions/checkout@v4
+    - name: Prepare workspace
+      run: 'set -euo pipefail
 
-      - name: Ensure workspace folders
-        run: |
-          mkdir -p cache/sources
-          mkdir -p cache/portage/distfiles
-          mkdir -p cache/portage/packages
-          mkdir -p artifacts
-          mkdir -p .ci
+        mkdir -p cache/sources artifacts .ci
 
-      - name: Restore source cache
-        uses: actions/cache@v4
-        with:
-          path: cache/sources
-          key: ${{ env.SOURCE_CACHE_KEY_PREFIX }}-${{ hashFiles('02Preparation') }}
-          restore-keys: |
-            ${{ env.SOURCE_CACHE_KEY_PREFIX }}-
+        chmod +x ci/run_stage.sh
 
-      - name: Restore Portage caches
-        uses: actions/cache@v4
-        with:
-          path: |
-            cache/portage/distfiles
-            cache/portage/packages
-          key: ${{ env.PORTAGE_CACHE_KEY_PREFIX }}-${{ runner.os }}-${{ env.GENTOO_IMAGE }}
-          restore-keys: |
-            ${{ env.PORTAGE_CACHE_KEY_PREFIX }}-${{ runner.os }}-
-            ${{ env.PORTAGE_CACHE_KEY_PREFIX }}-
+        '
+    - name: Restore source cache
+      uses: actions/cache@v4
+      with:
+        path: cache/sources
+        key: ${{ env.SOURCE_CACHE_KEY_PREFIX }}-${{ hashFiles('02Preparation') }}
+        restore-keys: '${{ env.SOURCE_CACHE_KEY_PREFIX }}-
 
-      - name: Build Gentoo i486 systemd stage3 image
-        id: build_stage3
-        run: |
-          set -euo pipefail
-          build_dir=.ci/stage3-image
-          mkdir -p "$build_dir"
-          pushd "$build_dir" >/dev/null
+          '
+    - name: Run stage 02
+      run: 'docker run --rm --privileged \
 
-          base_url="https://distfiles.gentoo.org/releases/x86/autobuilds/current-stage3-i486-systemd"
-          latest_rel=$(curl -fsSL "${base_url}/latest-stage3-i486-systemd.txt" | grep -E '^stage3-.*\.tar\.xz' | tail -n1 | awk '{print $1}')
-          if [ -z "$latest_rel" ]; then
-            echo "Failed to determine latest stage3 build" >&2
-            exit 1
-          fi
-          tarball_url="${base_url}/${latest_rel}"
-          tarball_name=$(basename "$tarball_url")
+        -v "${PWD}:/workspace" \
 
-          curl -fsSLO "$tarball_url"
-          mv "$tarball_name" stage3.tar.xz
+        -v "${PWD}/cache/sources:/workspace/cache/sources" \
 
-          printf '%s\n' \
-            "FROM scratch" \
-            "ADD stage3.tar.xz /" \
-            "CMD [\"/bin/bash\"]" > Dockerfile
+        -w /workspace \
 
-          docker build -t "${GENTOO_IMAGE}" .
-          docker save "${GENTOO_IMAGE}" -o ../gentoo-stage3-i486-systemd.tar
-          popd >/dev/null
+        -e COMMON_APT_PACKAGES="${COMMON_APT_PACKAGES}" \
 
-          echo "image=${GENTOO_IMAGE}" >> "$GITHUB_OUTPUT"
+        -e HOST_UID="$(id -u)" \
 
-      - name: Stage 1 – Toolchain bootstrap
-        env:
-          SELECTED_GENTOO_IMAGE: ${{ steps.build_stage3.outputs.image }}
-        run: |
-          set -euo pipefail
-          HOST_UID=$(id -u)
-          HOST_GID=$(id -g)
-          rm -f .ci/libero.img .ci/libero-stage1.img .ci/libero-stage1.img.xz
-          mkdir -p .ci
+        -e HOST_GID="$(id -g)" \
 
-          printf '%s\n' \
-            '#!/bin/bash' \
-            'set -euo pipefail' \
-            'source /etc/profile' \
-            '' \
-            'if ! command -v sudo >/dev/null 2>&1; then' \
-            '  if [ ! -d /usr/bin ]; then' \
-            '    mkdir -p /usr/bin' \
-            '  fi' \
-            '  printf '\''%s\n'\'' '\''#!/bin/sh'\'' '\''exec "$@"'\'' >/usr/bin/sudo' \
-            '  chmod +x /usr/bin/sudo' \
-            'fi' \
-            '' \
-            'if [ ! -d /var/db/repos/gentoo/profiles ]; then' \
-            '  emerge-webrsync' \
-            'fi' \
-            '' \
-            'emerge --quiet --oneshot sys-block/parted dev-libs/libisoburn dev-vcs/git net-misc/wget rsync' \
-            '' \
-            'mkdir -p /workspace/.ci' \
-            'IMAGE=/workspace/.ci/libero.img' \
-            'truncate -s "${LIBERO_IMAGE_SIZE:-25G}" "$IMAGE"' \
-            'loopdev=$(losetup --find --show --partscan "$IMAGE")' \
-            '' \
-            'if [[ "$loopdev" =~ (loop[0-9]+|nvme[0-9]+n[0-9]+|mmcblk[0-9]+) ]]; then' \
-            '  part_suffix="p"' \
-            'else' \
-            '  part_suffix=""' \
-            'fi' \
-            '' \
-            'swap_part="${loopdev}${part_suffix}2"' \
-            'root_part="${loopdev}${part_suffix}3"' \
-            '' \
-            'cleanup() {' \
-            '  set +e' \
-            '  swapoff "$swap_part" 2>/dev/null' \
-            '  for target in /mnt/libero/dev/shm /mnt/libero/dev/pts /mnt/libero/dev /mnt/libero/proc /mnt/libero/sys /mnt/libero/run /mnt/libero; do' \
-            '    umount -l "$target" 2>/dev/null' \
-            '  done' \
-            '  losetup -d "$loopdev" 2>/dev/null' \
-            '}' \
-            'trap cleanup EXIT' \
-            '' \
-            'export DEVICE="$loopdev"' \
-            'export LIBERO_AUTOMATION=1' \
-            'export LIBERO_SOURCE_CACHE LIBERO_CACHE_UID LIBERO_CACHE_GID' \
-            '' \
-            'for script in 01Requirements 02Preparation 03CrossCompiler 04CrossCompilingTools; do' \
-            '  echo "::group::Stage1 ${script}"' \
-            '  bash "./${script}"' \
-            '  echo "::endgroup::"' \
-            'done' \
-            '' \
-            'echo "::group::Stage1 05PrepChrootEnv"' \
-            'bash ./05PrepChrootEnv' \
-            'echo "::endgroup::"' \
-            '' \
-            'mkdir -p /workspace/cache/sources' \
-            'chown -R "${HOST_UID:-0}:${HOST_GID:-0}" /workspace/cache/sources || true' \
-            > .ci/stage1.sh
-          chmod +x .ci/stage1.sh
+        -e LIBERO_IMAGE_SIZE="${LIBERO_IMAGE_SIZE}" \
 
-          docker run --rm --privileged \
-            -v "${PWD}:/workspace" \
-            -v "${PWD}/cache/sources:/workspace/cache/sources" \
-            -v "${PWD}/cache/portage/distfiles:/var/cache/distfiles" \
-            -v "${PWD}/cache/portage/packages:/var/cache/binpkgs" \
-            -w /workspace \
-            -e LIBERO_IMAGE_SIZE="${LIBERO_IMAGE_SIZE}" \
-            -e LIBERO_SOURCE_CACHE=/workspace/cache/sources \
-            -e LIBERO_CACHE_UID="${HOST_UID}" \
-            -e LIBERO_CACHE_GID="${HOST_GID}" \
-            -e HOST_UID="${HOST_UID}" \
-            -e HOST_GID="${HOST_GID}" \
-            "${SELECTED_GENTOO_IMAGE}" \
-            /workspace/.ci/stage1.sh
+        -e ISO_ARTIFACT_PATH="${ISO_ARTIFACT_PATH}" \
 
-      - name: Compress stage1 disk image
-        run: |
-          set -euo pipefail
-          if [ -f .ci/libero.img ]; then
-            mv .ci/libero.img .ci/libero-stage1.img
-            xz -T0 .ci/libero-stage1.img
-          fi
+        "${DEBIAN_IMAGE}" \
 
-      - name: Upload stage1 disk image
-        uses: actions/upload-artifact@v4
-        with:
-          name: libero-stage1-img
-          path: .ci/libero-stage1.img.xz
-          if-no-files-found: error
+        /workspace/ci/run_stage.sh 02
 
-      - name: Upload Gentoo systemd stage3 image
-        uses: actions/upload-artifact@v4
-        with:
-          name: gentoo-stage3-i486-systemd-image
-          path: .ci/gentoo-stage3-i486-systemd.tar
-          if-no-files-found: error
-
-      - name: Cleanup stage1 workspace
-        if: always()
-        run: rm -rf .ci
-
-  build:
-    needs: prepare
+        '
+    - name: Package disk image
+      run: "set -euo pipefail\nif [ -f .ci/libero.img ]; then\n  xz -T0 .ci/libero.img\n\
+        \  mv .ci/libero.img.xz .ci/libero-disk-02.img.xz\nelse\n  echo \"Disk image\
+        \ not found\" >&2\n  exit 1\nfi\n"
+    - name: Upload disk artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: libero-disk-02
+        path: .ci/libero-disk-02.img.xz
+        if-no-files-found: error
+    - name: Cleanup
+      if: always()
+      run: rm -rf .ci
+  03CrossCompiler:
+    name: 03CrossCompiler
     runs-on: ubuntu-latest
     timeout-minutes: 360
-
+    needs: 02Preparation
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+    - uses: actions/checkout@v4
+    - name: Prepare workspace
+      run: 'set -euo pipefail
 
-      - name: Ensure workspace folders
-        run: |
-          mkdir -p cache/sources
-          mkdir -p cache/portage/distfiles
-          mkdir -p cache/portage/packages
-          mkdir -p artifacts
-          mkdir -p .ci
+        mkdir -p cache/sources artifacts .ci
 
-      - name: Restore source cache
-        uses: actions/cache@v4
-        with:
-          path: cache/sources
-          key: ${{ env.SOURCE_CACHE_KEY_PREFIX }}-${{ hashFiles('02Preparation') }}
-          restore-keys: |
-            ${{ env.SOURCE_CACHE_KEY_PREFIX }}-
+        chmod +x ci/run_stage.sh
 
-      - name: Restore Portage caches
-        uses: actions/cache@v4
-        with:
-          path: |
-            cache/portage/distfiles
-            cache/portage/packages
-          key: ${{ env.PORTAGE_CACHE_KEY_PREFIX }}-${{ runner.os }}-${{ env.GENTOO_IMAGE }}
-          restore-keys: |
-            ${{ env.PORTAGE_CACHE_KEY_PREFIX }}-${{ runner.os }}-
-            ${{ env.PORTAGE_CACHE_KEY_PREFIX }}-
+        '
+    - name: Restore source cache
+      uses: actions/cache@v4
+      with:
+        path: cache/sources
+        key: ${{ env.SOURCE_CACHE_KEY_PREFIX }}-${{ hashFiles('02Preparation') }}
+        restore-keys: '${{ env.SOURCE_CACHE_KEY_PREFIX }}-
 
-      - name: Download stage1 disk image
-        uses: actions/download-artifact@v4
-        with:
-          name: libero-stage1-img
-          path: .ci
+          '
+    - name: Download disk from stage 02
+      uses: actions/download-artifact@v4
+      with:
+        name: libero-disk-02
+        path: .ci
+    - name: Decompress disk image
+      run: 'set -euo pipefail
 
-      - name: Decompress stage1 disk image
-        run: |
-          set -euo pipefail
-          xz -d .ci/libero-stage1.img.xz
-          mv .ci/libero-stage1.img .ci/libero.img
+        mv .ci/libero-disk-02.img.xz .ci/libero.img.xz
 
-      - name: Download Gentoo systemd stage3 image
-        uses: actions/download-artifact@v4
-        with:
-          name: gentoo-stage3-i486-systemd-image
-          path: .ci
+        xz -d .ci/libero.img.xz
 
-      - name: Load Gentoo systemd stage3 image
-        run: docker load -i .ci/gentoo-stage3-i486-systemd.tar
+        '
+    - name: Run stage 03
+      run: 'docker run --rm --privileged \
 
-      - name: Stage 2 – System build and ISO
-        env:
-          SELECTED_GENTOO_IMAGE: ${{ needs.prepare.outputs.gentoo_image }}
-        run: |
-          set -euo pipefail
-          HOST_UID=$(id -u)
-          HOST_GID=$(id -g)
-          mkdir -p .ci
-          printf '%s\n' \
-            '#!/bin/bash' \
-            'set -euo pipefail' \
-            'source /etc/profile' \
-            '' \
-            'if ! command -v sudo >/dev/null 2>&1; then' \
-            '  if [ ! -d /usr/bin ]; then' \
-            '    mkdir -p /usr/bin' \
-            '  fi' \
-            '  printf '\''%s\n'\'' '\''#!/bin/sh'\'' '\''exec "$@"'\'' >/usr/bin/sudo' \
-            '  chmod +x /usr/bin/sudo' \
-            'fi' \
-            '' \
-            'if [ ! -d /var/db/repos/gentoo/profiles ]; then' \
-            '  emerge-webrsync' \
-            'fi' \
-            '' \
-            'emerge --quiet --oneshot sys-block/parted app-cdr/xorriso dev-vcs/git net-misc/wget rsync' \
-            '' \
-            'IMAGE=/workspace/.ci/libero.img' \
-            'if [ ! -f "$IMAGE" ]; then' \
-            '  echo "Missing disk image for stage 2" >&2' \
-            '  exit 1' \
-            'fi' \
-            '' \
-            'loopdev=$(losetup --find --show --partscan "$IMAGE")' \
-            '' \
-            'if [[ "$loopdev" =~ (loop[0-9]+|nvme[0-9]+n[0-9]+|mmcblk[0-9]+) ]]; then' \
-            '  part_suffix="p"' \
-            'else' \
-            '  part_suffix=""' \
-            'fi' \
-            '' \
-            'swap_part="${loopdev}${part_suffix}2"' \
-            'root_part="${loopdev}${part_suffix}3"' \
-            '' \
-            'cleanup() {' \
-            '  set +e' \
-            '  swapoff "$swap_part" 2>/dev/null' \
-            '  for target in /mnt/libero/dev/shm /mnt/libero/dev/pts /mnt/libero/dev /mnt/libero/proc /mnt/libero/sys /mnt/libero/run /mnt/libero; do' \
-            '    umount -l "$target" 2>/dev/null' \
-            '  done' \
-            '  losetup -d "$loopdev" 2>/dev/null' \
-            '}' \
-            'trap cleanup EXIT' \
-            '' \
-            'mkdir -p /mnt/libero' \
-            'mount "$root_part" /mnt/libero' \
-            'swapon "$swap_part" 2>/dev/null || true' \
-            '' \
-            'export LIBERO_AUTOMATION=1' \
-            'export LIBERO_SOURCE_CACHE LIBERO_CACHE_UID LIBERO_CACHE_GID' \
-            '' \
-            'echo "::group::Stage2 05PrepChrootEnv"' \
-            'bash ./05PrepChrootEnv' \
-            'echo "::endgroup::"' \
-            '' \
-            'install -d /mnt/libero/root/libero-ci' \
-            'for script in 06ChrootEnv 07AdditionalCrossCompilingTools 08BasicSystemSoftware 09SystemConfiguration 10MakingLiberoBootable; do' \
-            '  cp "/workspace/${script}" "/mnt/libero/root/libero-ci/${script}"' \
-            '  chmod +x "/mnt/libero/root/libero-ci/${script}"' \
-            'done' \
-            '' \
-            'printf '\''%s\n'\'' '\''#!/bin/bash'\'' '\''set -euo pipefail'\'' '\''source /etc/profile'\'' '\''export LIBERO_AUTOMATION=1'\'' '\''cd /root/libero-ci'\'' '\''for script in 06ChrootEnv 07AdditionalCrossCompilingTools 08BasicSystemSoftware 09SystemConfiguration 10MakingLiberoBootable; do'\'' '\''  echo "::group::(chroot) ${script}"'\'' '\''  bash "./${script}"'\'' '\''  echo "::endgroup::"'\'' '\''done'\'' >/mnt/libero/root/libero-ci/chroot-run.sh' \
-            'chmod +x /mnt/libero/root/libero-ci/chroot-run.sh' \
-            '' \
-            'sudo chroot /mnt/libero /bin/bash /root/libero-ci/chroot-run.sh' \
-            '' \
-            'mkdir -p /workspace/$(dirname "${ISO_ARTIFACT_PATH}")' \
-            'LIBERO_ISO_OUTPUT=/workspace/"${ISO_ARTIFACT_PATH}" bash ./11MakeBootableISO' \
-            'chown "${HOST_UID:-0}:${HOST_GID:-0}" /workspace/"${ISO_ARTIFACT_PATH}" || true' \
-            'chown -R "${HOST_UID:-0}:${HOST_GID:-0}" /workspace/cache/sources || true' \
-            'ls -lh /workspace/"${ISO_ARTIFACT_PATH}"' \
-            > .ci/stage2.sh
+        -v "${PWD}:/workspace" \
 
-          chmod +x .ci/stage2.sh
+        -v "${PWD}/cache/sources:/workspace/cache/sources" \
 
-          docker run --rm --privileged \
-            -v "${PWD}:/workspace" \
-            -v "${PWD}/cache/sources:/workspace/cache/sources" \
-            -v "${PWD}/cache/portage/distfiles:/var/cache/distfiles" \
-            -v "${PWD}/cache/portage/packages:/var/cache/binpkgs" \
-            -w /workspace \
-            -e LIBERO_SOURCE_CACHE=/workspace/cache/sources \
-            -e LIBERO_CACHE_UID="${HOST_UID}" \
-            -e LIBERO_CACHE_GID="${HOST_GID}" \
-            -e HOST_UID="${HOST_UID}" \
-            -e HOST_GID="${HOST_GID}" \
-            -e ISO_ARTIFACT_PATH="${ISO_ARTIFACT_PATH}" \
-            "${SELECTED_GENTOO_IMAGE}" \
-            /workspace/.ci/stage2.sh
+        -w /workspace \
 
-      - name: Remove temporary disk image
-        if: always()
-        run: rm -rf .ci
+        -e COMMON_APT_PACKAGES="${COMMON_APT_PACKAGES}" \
 
-      - name: Upload ISO artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: libero-iso
-          path: artifacts/libero-server-edition.iso
-          if-no-files-found: error
+        -e HOST_UID="$(id -u)" \
+
+        -e HOST_GID="$(id -g)" \
+
+        -e LIBERO_IMAGE_SIZE="${LIBERO_IMAGE_SIZE}" \
+
+        -e ISO_ARTIFACT_PATH="${ISO_ARTIFACT_PATH}" \
+
+        "${DEBIAN_IMAGE}" \
+
+        /workspace/ci/run_stage.sh 03
+
+        '
+    - name: Package disk image
+      run: "set -euo pipefail\nif [ -f .ci/libero.img ]; then\n  xz -T0 .ci/libero.img\n\
+        \  mv .ci/libero.img.xz .ci/libero-disk-03.img.xz\nelse\n  echo \"Disk image\
+        \ not found\" >&2\n  exit 1\nfi\n"
+    - name: Upload disk artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: libero-disk-03
+        path: .ci/libero-disk-03.img.xz
+        if-no-files-found: error
+    - name: Cleanup
+      if: always()
+      run: rm -rf .ci
+  04CrossCompilingTools:
+    name: 04CrossCompilingTools
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    needs: 03CrossCompiler
+    steps:
+    - uses: actions/checkout@v4
+    - name: Prepare workspace
+      run: 'set -euo pipefail
+
+        mkdir -p cache/sources artifacts .ci
+
+        chmod +x ci/run_stage.sh
+
+        '
+    - name: Restore source cache
+      uses: actions/cache@v4
+      with:
+        path: cache/sources
+        key: ${{ env.SOURCE_CACHE_KEY_PREFIX }}-${{ hashFiles('02Preparation') }}
+        restore-keys: '${{ env.SOURCE_CACHE_KEY_PREFIX }}-
+
+          '
+    - name: Download disk from stage 03
+      uses: actions/download-artifact@v4
+      with:
+        name: libero-disk-03
+        path: .ci
+    - name: Decompress disk image
+      run: 'set -euo pipefail
+
+        mv .ci/libero-disk-03.img.xz .ci/libero.img.xz
+
+        xz -d .ci/libero.img.xz
+
+        '
+    - name: Run stage 04
+      run: 'docker run --rm --privileged \
+
+        -v "${PWD}:/workspace" \
+
+        -v "${PWD}/cache/sources:/workspace/cache/sources" \
+
+        -w /workspace \
+
+        -e COMMON_APT_PACKAGES="${COMMON_APT_PACKAGES}" \
+
+        -e HOST_UID="$(id -u)" \
+
+        -e HOST_GID="$(id -g)" \
+
+        -e LIBERO_IMAGE_SIZE="${LIBERO_IMAGE_SIZE}" \
+
+        -e ISO_ARTIFACT_PATH="${ISO_ARTIFACT_PATH}" \
+
+        "${DEBIAN_IMAGE}" \
+
+        /workspace/ci/run_stage.sh 04
+
+        '
+    - name: Package disk image
+      run: "set -euo pipefail\nif [ -f .ci/libero.img ]; then\n  xz -T0 .ci/libero.img\n\
+        \  mv .ci/libero.img.xz .ci/libero-disk-04.img.xz\nelse\n  echo \"Disk image\
+        \ not found\" >&2\n  exit 1\nfi\n"
+    - name: Upload disk artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: libero-disk-04
+        path: .ci/libero-disk-04.img.xz
+        if-no-files-found: error
+    - name: Cleanup
+      if: always()
+      run: rm -rf .ci
+  05PrepChrootEnv:
+    name: 05PrepChrootEnv
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    needs: 04CrossCompilingTools
+    steps:
+    - uses: actions/checkout@v4
+    - name: Prepare workspace
+      run: 'set -euo pipefail
+
+        mkdir -p cache/sources artifacts .ci
+
+        chmod +x ci/run_stage.sh
+
+        '
+    - name: Restore source cache
+      uses: actions/cache@v4
+      with:
+        path: cache/sources
+        key: ${{ env.SOURCE_CACHE_KEY_PREFIX }}-${{ hashFiles('02Preparation') }}
+        restore-keys: '${{ env.SOURCE_CACHE_KEY_PREFIX }}-
+
+          '
+    - name: Download disk from stage 04
+      uses: actions/download-artifact@v4
+      with:
+        name: libero-disk-04
+        path: .ci
+    - name: Decompress disk image
+      run: 'set -euo pipefail
+
+        mv .ci/libero-disk-04.img.xz .ci/libero.img.xz
+
+        xz -d .ci/libero.img.xz
+
+        '
+    - name: Run stage 05
+      run: 'docker run --rm --privileged \
+
+        -v "${PWD}:/workspace" \
+
+        -v "${PWD}/cache/sources:/workspace/cache/sources" \
+
+        -w /workspace \
+
+        -e COMMON_APT_PACKAGES="${COMMON_APT_PACKAGES}" \
+
+        -e HOST_UID="$(id -u)" \
+
+        -e HOST_GID="$(id -g)" \
+
+        -e LIBERO_IMAGE_SIZE="${LIBERO_IMAGE_SIZE}" \
+
+        -e ISO_ARTIFACT_PATH="${ISO_ARTIFACT_PATH}" \
+
+        "${DEBIAN_IMAGE}" \
+
+        /workspace/ci/run_stage.sh 05
+
+        '
+    - name: Package disk image
+      run: "set -euo pipefail\nif [ -f .ci/libero.img ]; then\n  xz -T0 .ci/libero.img\n\
+        \  mv .ci/libero.img.xz .ci/libero-disk-05.img.xz\nelse\n  echo \"Disk image\
+        \ not found\" >&2\n  exit 1\nfi\n"
+    - name: Upload disk artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: libero-disk-05
+        path: .ci/libero-disk-05.img.xz
+        if-no-files-found: error
+    - name: Cleanup
+      if: always()
+      run: rm -rf .ci
+  06ChrootEnv:
+    name: 06ChrootEnv
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    needs: 05PrepChrootEnv
+    steps:
+    - uses: actions/checkout@v4
+    - name: Prepare workspace
+      run: 'set -euo pipefail
+
+        mkdir -p cache/sources artifacts .ci
+
+        chmod +x ci/run_stage.sh
+
+        '
+    - name: Restore source cache
+      uses: actions/cache@v4
+      with:
+        path: cache/sources
+        key: ${{ env.SOURCE_CACHE_KEY_PREFIX }}-${{ hashFiles('02Preparation') }}
+        restore-keys: '${{ env.SOURCE_CACHE_KEY_PREFIX }}-
+
+          '
+    - name: Download disk from stage 05
+      uses: actions/download-artifact@v4
+      with:
+        name: libero-disk-05
+        path: .ci
+    - name: Decompress disk image
+      run: 'set -euo pipefail
+
+        mv .ci/libero-disk-05.img.xz .ci/libero.img.xz
+
+        xz -d .ci/libero.img.xz
+
+        '
+    - name: Run stage 06
+      run: 'docker run --rm --privileged \
+
+        -v "${PWD}:/workspace" \
+
+        -v "${PWD}/cache/sources:/workspace/cache/sources" \
+
+        -w /workspace \
+
+        -e COMMON_APT_PACKAGES="${COMMON_APT_PACKAGES}" \
+
+        -e HOST_UID="$(id -u)" \
+
+        -e HOST_GID="$(id -g)" \
+
+        -e LIBERO_IMAGE_SIZE="${LIBERO_IMAGE_SIZE}" \
+
+        -e ISO_ARTIFACT_PATH="${ISO_ARTIFACT_PATH}" \
+
+        "${DEBIAN_IMAGE}" \
+
+        /workspace/ci/run_stage.sh 06
+
+        '
+    - name: Package disk image
+      run: "set -euo pipefail\nif [ -f .ci/libero.img ]; then\n  xz -T0 .ci/libero.img\n\
+        \  mv .ci/libero.img.xz .ci/libero-disk-06.img.xz\nelse\n  echo \"Disk image\
+        \ not found\" >&2\n  exit 1\nfi\n"
+    - name: Upload disk artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: libero-disk-06
+        path: .ci/libero-disk-06.img.xz
+        if-no-files-found: error
+    - name: Cleanup
+      if: always()
+      run: rm -rf .ci
+  07AdditionalCrossCompilingTools:
+    name: 07AdditionalCrossCompilingTools
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    needs: 06ChrootEnv
+    steps:
+    - uses: actions/checkout@v4
+    - name: Prepare workspace
+      run: 'set -euo pipefail
+
+        mkdir -p cache/sources artifacts .ci
+
+        chmod +x ci/run_stage.sh
+
+        '
+    - name: Restore source cache
+      uses: actions/cache@v4
+      with:
+        path: cache/sources
+        key: ${{ env.SOURCE_CACHE_KEY_PREFIX }}-${{ hashFiles('02Preparation') }}
+        restore-keys: '${{ env.SOURCE_CACHE_KEY_PREFIX }}-
+
+          '
+    - name: Download disk from stage 06
+      uses: actions/download-artifact@v4
+      with:
+        name: libero-disk-06
+        path: .ci
+    - name: Decompress disk image
+      run: 'set -euo pipefail
+
+        mv .ci/libero-disk-06.img.xz .ci/libero.img.xz
+
+        xz -d .ci/libero.img.xz
+
+        '
+    - name: Run stage 07
+      run: 'docker run --rm --privileged \
+
+        -v "${PWD}:/workspace" \
+
+        -v "${PWD}/cache/sources:/workspace/cache/sources" \
+
+        -w /workspace \
+
+        -e COMMON_APT_PACKAGES="${COMMON_APT_PACKAGES}" \
+
+        -e HOST_UID="$(id -u)" \
+
+        -e HOST_GID="$(id -g)" \
+
+        -e LIBERO_IMAGE_SIZE="${LIBERO_IMAGE_SIZE}" \
+
+        -e ISO_ARTIFACT_PATH="${ISO_ARTIFACT_PATH}" \
+
+        "${DEBIAN_IMAGE}" \
+
+        /workspace/ci/run_stage.sh 07
+
+        '
+    - name: Package disk image
+      run: "set -euo pipefail\nif [ -f .ci/libero.img ]; then\n  xz -T0 .ci/libero.img\n\
+        \  mv .ci/libero.img.xz .ci/libero-disk-07.img.xz\nelse\n  echo \"Disk image\
+        \ not found\" >&2\n  exit 1\nfi\n"
+    - name: Upload disk artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: libero-disk-07
+        path: .ci/libero-disk-07.img.xz
+        if-no-files-found: error
+    - name: Cleanup
+      if: always()
+      run: rm -rf .ci
+  08BasicSystemSoftware:
+    name: 08BasicSystemSoftware
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    needs: 07AdditionalCrossCompilingTools
+    steps:
+    - uses: actions/checkout@v4
+    - name: Prepare workspace
+      run: 'set -euo pipefail
+
+        mkdir -p cache/sources artifacts .ci
+
+        chmod +x ci/run_stage.sh
+
+        '
+    - name: Restore source cache
+      uses: actions/cache@v4
+      with:
+        path: cache/sources
+        key: ${{ env.SOURCE_CACHE_KEY_PREFIX }}-${{ hashFiles('02Preparation') }}
+        restore-keys: '${{ env.SOURCE_CACHE_KEY_PREFIX }}-
+
+          '
+    - name: Download disk from stage 07
+      uses: actions/download-artifact@v4
+      with:
+        name: libero-disk-07
+        path: .ci
+    - name: Decompress disk image
+      run: 'set -euo pipefail
+
+        mv .ci/libero-disk-07.img.xz .ci/libero.img.xz
+
+        xz -d .ci/libero.img.xz
+
+        '
+    - name: Run stage 08
+      run: 'docker run --rm --privileged \
+
+        -v "${PWD}:/workspace" \
+
+        -v "${PWD}/cache/sources:/workspace/cache/sources" \
+
+        -w /workspace \
+
+        -e COMMON_APT_PACKAGES="${COMMON_APT_PACKAGES}" \
+
+        -e HOST_UID="$(id -u)" \
+
+        -e HOST_GID="$(id -g)" \
+
+        -e LIBERO_IMAGE_SIZE="${LIBERO_IMAGE_SIZE}" \
+
+        -e ISO_ARTIFACT_PATH="${ISO_ARTIFACT_PATH}" \
+
+        "${DEBIAN_IMAGE}" \
+
+        /workspace/ci/run_stage.sh 08
+
+        '
+    - name: Package disk image
+      run: "set -euo pipefail\nif [ -f .ci/libero.img ]; then\n  xz -T0 .ci/libero.img\n\
+        \  mv .ci/libero.img.xz .ci/libero-disk-08.img.xz\nelse\n  echo \"Disk image\
+        \ not found\" >&2\n  exit 1\nfi\n"
+    - name: Upload disk artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: libero-disk-08
+        path: .ci/libero-disk-08.img.xz
+        if-no-files-found: error
+    - name: Cleanup
+      if: always()
+      run: rm -rf .ci
+  09SystemConfiguration:
+    name: 09SystemConfiguration
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    needs: 08BasicSystemSoftware
+    steps:
+    - uses: actions/checkout@v4
+    - name: Prepare workspace
+      run: 'set -euo pipefail
+
+        mkdir -p cache/sources artifacts .ci
+
+        chmod +x ci/run_stage.sh
+
+        '
+    - name: Restore source cache
+      uses: actions/cache@v4
+      with:
+        path: cache/sources
+        key: ${{ env.SOURCE_CACHE_KEY_PREFIX }}-${{ hashFiles('02Preparation') }}
+        restore-keys: '${{ env.SOURCE_CACHE_KEY_PREFIX }}-
+
+          '
+    - name: Download disk from stage 08
+      uses: actions/download-artifact@v4
+      with:
+        name: libero-disk-08
+        path: .ci
+    - name: Decompress disk image
+      run: 'set -euo pipefail
+
+        mv .ci/libero-disk-08.img.xz .ci/libero.img.xz
+
+        xz -d .ci/libero.img.xz
+
+        '
+    - name: Run stage 09
+      run: 'docker run --rm --privileged \
+
+        -v "${PWD}:/workspace" \
+
+        -v "${PWD}/cache/sources:/workspace/cache/sources" \
+
+        -w /workspace \
+
+        -e COMMON_APT_PACKAGES="${COMMON_APT_PACKAGES}" \
+
+        -e HOST_UID="$(id -u)" \
+
+        -e HOST_GID="$(id -g)" \
+
+        -e LIBERO_IMAGE_SIZE="${LIBERO_IMAGE_SIZE}" \
+
+        -e ISO_ARTIFACT_PATH="${ISO_ARTIFACT_PATH}" \
+
+        "${DEBIAN_IMAGE}" \
+
+        /workspace/ci/run_stage.sh 09
+
+        '
+    - name: Package disk image
+      run: "set -euo pipefail\nif [ -f .ci/libero.img ]; then\n  xz -T0 .ci/libero.img\n\
+        \  mv .ci/libero.img.xz .ci/libero-disk-09.img.xz\nelse\n  echo \"Disk image\
+        \ not found\" >&2\n  exit 1\nfi\n"
+    - name: Upload disk artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: libero-disk-09
+        path: .ci/libero-disk-09.img.xz
+        if-no-files-found: error
+    - name: Cleanup
+      if: always()
+      run: rm -rf .ci
+  10MakingLiberoBootable:
+    name: 10MakingLiberoBootable
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    needs: 09SystemConfiguration
+    steps:
+    - uses: actions/checkout@v4
+    - name: Prepare workspace
+      run: 'set -euo pipefail
+
+        mkdir -p cache/sources artifacts .ci
+
+        chmod +x ci/run_stage.sh
+
+        '
+    - name: Restore source cache
+      uses: actions/cache@v4
+      with:
+        path: cache/sources
+        key: ${{ env.SOURCE_CACHE_KEY_PREFIX }}-${{ hashFiles('02Preparation') }}
+        restore-keys: '${{ env.SOURCE_CACHE_KEY_PREFIX }}-
+
+          '
+    - name: Download disk from stage 09
+      uses: actions/download-artifact@v4
+      with:
+        name: libero-disk-09
+        path: .ci
+    - name: Decompress disk image
+      run: 'set -euo pipefail
+
+        mv .ci/libero-disk-09.img.xz .ci/libero.img.xz
+
+        xz -d .ci/libero.img.xz
+
+        '
+    - name: Run stage 10
+      run: 'docker run --rm --privileged \
+
+        -v "${PWD}:/workspace" \
+
+        -v "${PWD}/cache/sources:/workspace/cache/sources" \
+
+        -w /workspace \
+
+        -e COMMON_APT_PACKAGES="${COMMON_APT_PACKAGES}" \
+
+        -e HOST_UID="$(id -u)" \
+
+        -e HOST_GID="$(id -g)" \
+
+        -e LIBERO_IMAGE_SIZE="${LIBERO_IMAGE_SIZE}" \
+
+        -e ISO_ARTIFACT_PATH="${ISO_ARTIFACT_PATH}" \
+
+        "${DEBIAN_IMAGE}" \
+
+        /workspace/ci/run_stage.sh 10
+
+        '
+    - name: Package disk image
+      run: "set -euo pipefail\nif [ -f .ci/libero.img ]; then\n  xz -T0 .ci/libero.img\n\
+        \  mv .ci/libero.img.xz .ci/libero-disk-10.img.xz\nelse\n  echo \"Disk image\
+        \ not found\" >&2\n  exit 1\nfi\n"
+    - name: Upload disk artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: libero-disk-10
+        path: .ci/libero-disk-10.img.xz
+        if-no-files-found: error
+    - name: Cleanup
+      if: always()
+      run: rm -rf .ci
+  11MakeBootableISO:
+    name: 11MakeBootableISO
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    needs: 10MakingLiberoBootable
+    steps:
+    - uses: actions/checkout@v4
+    - name: Prepare workspace
+      run: 'set -euo pipefail
+
+        mkdir -p cache/sources artifacts .ci
+
+        chmod +x ci/run_stage.sh
+
+        '
+    - name: Restore source cache
+      uses: actions/cache@v4
+      with:
+        path: cache/sources
+        key: ${{ env.SOURCE_CACHE_KEY_PREFIX }}-${{ hashFiles('02Preparation') }}
+        restore-keys: '${{ env.SOURCE_CACHE_KEY_PREFIX }}-
+
+          '
+    - name: Download disk from stage 10
+      uses: actions/download-artifact@v4
+      with:
+        name: libero-disk-10
+        path: .ci
+    - name: Decompress disk image
+      run: 'set -euo pipefail
+
+        mv .ci/libero-disk-10.img.xz .ci/libero.img.xz
+
+        xz -d .ci/libero.img.xz
+
+        '
+    - name: Run stage 11
+      run: 'docker run --rm --privileged \
+
+        -v "${PWD}:/workspace" \
+
+        -v "${PWD}/cache/sources:/workspace/cache/sources" \
+
+        -w /workspace \
+
+        -e COMMON_APT_PACKAGES="${COMMON_APT_PACKAGES}" \
+
+        -e HOST_UID="$(id -u)" \
+
+        -e HOST_GID="$(id -g)" \
+
+        -e LIBERO_IMAGE_SIZE="${LIBERO_IMAGE_SIZE}" \
+
+        -e ISO_ARTIFACT_PATH="${ISO_ARTIFACT_PATH}" \
+
+        "${DEBIAN_IMAGE}" \
+
+        /workspace/ci/run_stage.sh 11
+
+        '
+    - name: Upload ISO artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: libero-iso
+        path: artifacts/libero-server-edition.iso
+        if-no-files-found: error
+    - name: Cleanup
+      if: always()
+      run: rm -rf .ci
